@@ -1,0 +1,60 @@
+﻿
+≡ƒÅ¿ Hotel Booking API Tests
+
+1. Login as admin
+  Γ£à Admin login OK
+  Γ£à Admin role confirmed
+
+2. Login as user
+  Γ£à User login OK
+  Γ£à User role confirmed
+
+3. Fetch rooms
+  Γ£à Rooms fetched
+  Γ£à Rooms available
+   Using room: 101 (Standard) ΓÇö $150/night
+
+4. Create booking as user
+  Γ£à Booking created (status 201)
+  Γ£à Status is Pending
+  Γ£à Total = 150 ├ù 3 = 450
+
+5. Double-book same room ΓÇö should fail
+  Γ£à Double booking rejected (400)
+
+6. User booking history
+  Γ£à History fetched
+  Γ£à New booking appears in history
+  Γ£à Status still Pending
+
+7. Admin: list all bookings
+  Γ£à Admin booking list OK
+  Γ£à Returns array
+
+8. Admin: get booking details
+  Γ£à Detail fetched
+  Γ£à User info populated
+  Γ£à Room info populated
+
+9. Admin: approve booking
+  Γ£à Approve succeeded
+  Γ£à Status is now Approved
+
+10. User verifies status updated
+  Γ£à User sees Approved status
+
+11. Re-approve already Approved booking ΓÇö should fail
+  Γ£à Re-approve rejected (400)
+
+12. Non-admin tries admin route ΓÇö should fail
+  Γ£à Forbidden for non-admin (403)
+
+13. Validation: invalid dates
+  Γ£à Invalid dates rejected (400)
+
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+  Results: 24 passed, 0 failed, 24 total
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+
+≡ƒº╣ Cleaned up test booking
+

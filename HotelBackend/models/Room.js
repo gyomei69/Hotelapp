@@ -23,6 +23,10 @@ const roomSchema = new mongoose.Schema(
       default: 'Available',
     },
     features: [String],
+    imageUrl: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

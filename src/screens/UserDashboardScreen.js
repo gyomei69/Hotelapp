@@ -1,0 +1,329 @@
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Platform, TouchableOpacity, ActivityIndicator, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { getRooms, createBooking } from '../services/api';
+
+const { width } = Dimensions.get('window');
+
+export default function UserDashboardScreen({ setActiveTab }) {
+  const [rooms, setRooms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Booking Modal State
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [bookingData, setBookingData] = useState({
+    checkInDate: '',
+    checkOutDate: '',
+    guestCount: 1,
+    paymentMethod: 'Cash',
+    specialRequests: ''
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    loadAvailableRooms();
+  }, []);
+
+  const loadAvailableRooms = async () => {
+    try {
+      setLoading(true);
+      const allRooms = await getRooms();
+      setRooms(allRooms.filter(r => r.status === 'Available'));
+    } catch (error) {
+      console.error('Failed to load rooms:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openBooking = (room) => {
+    setSelectedRoom(room);
+    setBookingData({
+      checkInDate: new Date().toISOString().split('T')[0],
+      checkOutDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      guestCount: 1,
+      paymentMethod: 'Cash',
+      specialRequests: ''
+    });
+    setModalVisible(true);
+  };
+
+  const calculateTotal = () => {
+    if (!selectedRoom || !bookingData.checkInDate || !bookingData.checkOutDate) return 0;
+    const start = new Date(bookingData.checkInDate);
+    const end = new Date(bookingData.checkOutDate);
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return (diffDays || 1) * selectedRoom.price;
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!bookingData.checkInDate || !bookingData.checkOutDate) {
+      Alert.alert('Error', 'Please select both dates');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createBooking({
+        room: selectedRoom._id,
+        ...bookingData
+      });
+      
+      Alert.alert('Success ✨', 'Your reservation is confirmed! Enjoy your stay.', [
+        { text: 'View My Bookings', onPress: () => {
+            setModalVisible(false);
+            setActiveTab('mybookings');
+          }
+        },
+        { text: 'Close', onPress: () => {
+            setModalVisible(false);
+            loadAvailableRooms();
+          }
+        }
+      ]);
+    } catch (error) {
+      Alert.alert('Booking Failed', error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={{ height: Platform.OS === 'android' ? 44 : 12 }} />
+
+      {loading ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color="#4F46E5" />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          <View style={styles.promoCard}>
+            <Image 
+               source={{ uri: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80' }} 
+               style={styles.promoImage} 
+            />
+            <View style={styles.promoOverlay}>
+               <Text style={styles.promoTag}>LIMITED OFFER</Text>
+               <Text style={styles.promoTitle}>Get 20% off on your first stay</Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Exclusive Rooms</Text>
+            <TouchableOpacity><Text style={styles.seeAll}>See all</Text></TouchableOpacity>
+          </View>
+
+          {rooms.map(room => (
+            <View key={room._id} style={styles.card}>
+              <Image source={{ uri: room.imageUrl }} style={styles.roomImage} />
+              <View style={styles.cardBody}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.roomName}>{room.type}</Text>
+                  <View style={styles.statusBadge}>
+                    <View style={styles.greenDot} />
+                    <Text style={styles.statusText}>Available</Text>
+                  </View>
+                </View>
+                <Text style={styles.roomDesc} numberOfLines={2}>
+                  {room.description || 'Experience comfort and style in our prime selection rooms.'}
+                </Text>
+                
+                <View style={styles.cardFooter}>
+                  <View>
+                    <Text style={styles.priceLabel}>Price / Night</Text>
+                    <Text style={styles.priceValue}>${room.price}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.bookBtn} onPress={() => openBooking(room)}>
+                    <Text style={styles.bookBtnText}>Book Now</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ))}
+
+          {rooms.length === 0 && (
+            <View style={styles.emptyBox}>
+               <Feather name="moon" size={48} color="#CBD5E1" />
+               <Text style={styles.emptyText}>All rooms are fully booked for now.</Text>
+            </View>
+          )}
+
+        </ScrollView>
+      )}
+
+      {/* BOOKING MODAL */}
+      <Modal animationType="slide" transparent={true} visible={modalVisible}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Complete Reservation</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Feather name="x" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedRoom && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.roomSummary}>
+                   <Image source={{ uri: selectedRoom.imageUrl }} style={styles.summaryThumb} />
+                   <View style={styles.summaryInfo}>
+                      <Text style={styles.summaryName}>{selectedRoom.type}</Text>
+                      <Text style={styles.summarySub}>Room {selectedRoom.roomNumber}</Text>
+                   </View>
+                </View>
+
+                <View style={styles.formRow}>
+                   <View style={styles.formCol}>
+                      <Text style={styles.label}>Check-in</Text>
+                      <TextInput 
+                        style={styles.input} 
+                        value={bookingData.checkInDate} 
+                        onChangeText={(t) => setBookingData({...bookingData, checkInDate: t})}
+                        placeholder="YYYY-MM-DD"
+                      />
+                   </View>
+                   <View style={styles.formCol}>
+                      <Text style={styles.label}>Check-out</Text>
+                      <TextInput 
+                        style={styles.input} 
+                        value={bookingData.checkOutDate} 
+                        onChangeText={(t) => setBookingData({...bookingData, checkOutDate: t})}
+                        placeholder="YYYY-MM-DD"
+                      />
+                   </View>
+                </View>
+
+                <Text style={styles.label}>Guests</Text>
+                <View style={styles.guestSelector}>
+                   <TouchableOpacity 
+                     onPress={() => setBookingData({...bookingData, guestCount: Math.max(1, bookingData.guestCount - 1)})}
+                     style={styles.stepBtn}
+                   >
+                     <Feather name="minus" size={20} color="#1E293B" />
+                   </TouchableOpacity>
+                   <Text style={styles.guestCountText}>{bookingData.guestCount}</Text>
+                   <TouchableOpacity 
+                     onPress={() => setBookingData({...bookingData, guestCount: bookingData.guestCount + 1})}
+                     style={styles.stepBtn}
+                   >
+                     <Feather name="plus" size={20} color="#1E293B" />
+                   </TouchableOpacity>
+                </View>
+
+                <Text style={styles.label}>Payment Method</Text>
+                <View style={styles.paymentSelector}>
+                   {['Cash', 'Card', 'Online'].map(m => (
+                     <TouchableOpacity 
+                       key={m} 
+                       style={[styles.payBtn, bookingData.paymentMethod === m && styles.payBtnActive]}
+                       onPress={() => setBookingData({...bookingData, paymentMethod: m})}
+                      >
+                       <Text style={[styles.payText, bookingData.paymentMethod === m && styles.payTextActive]}>{m}</Text>
+                     </TouchableOpacity>
+                   ))}
+                </View>
+
+                <Text style={styles.label}>Special Requests</Text>
+                <TextInput 
+                   style={[styles.input, styles.textArea]} 
+                   multiline 
+                   placeholder="e.g. Late check-in, dietary needs..."
+                   value={bookingData.specialRequests}
+                   onChangeText={(t) => setBookingData({...bookingData, specialRequests: t})}
+                />
+
+                <View style={styles.priceCard}>
+                   <Text style={styles.totalLabel}>Estimated Total</Text>
+                   <Text style={styles.totalValue}>${calculateTotal()}</Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={[styles.confirmBtn, submitting && { opacity: 0.7 }]} 
+                  onPress={handleConfirmBooking}
+                  disabled={submitting}
+                >
+                  <Text style={styles.confirmText}>{submitting ? 'Confirming...' : 'Complete Booking'}</Text>
+                </TouchableOpacity>
+                <View style={{ height: 40 }} />
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { padding: 24, paddingBottom: 16, flexDirection: 'row', alignItems: 'center' },
+  headerTitleContainer: { flex: 1, alignItems: 'center', marginLeft: 44 }, // Offset the profile button width to center perfectly
+  greeting: { fontSize: 13, fontWeight: '600', color: '#8B5CF6', textTransform: 'uppercase', letterSpacing: 3, fontStyle: 'italic' },
+  title: { fontSize: 26, fontWeight: '900', color: '#1B2036', marginTop: 4, letterSpacing: 1 },
+  profileBtnWrapper: { position: 'absolute', right: 24 },
+  profileBtn: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
+  avatar: { width: '100%', height: '100%' },
+  centerBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { padding: 24, paddingTop: 0 },
+  
+  promoCard: { height: 180, borderRadius: 24, overflow: 'hidden', marginBottom: 32, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 15, elevation: 8 },
+  promoImage: { width: '100%', height: '100%' },
+  promoOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', padding: 20, justifyContent: 'flex-end' },
+  promoTag: { color: '#FCD34D', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  promoTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginTop: 4 },
+
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  sectionTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
+  seeAll: { color: '#4F46E5', fontWeight: '700', fontSize: 14 },
+
+  card: { backgroundColor: '#FFFFFF', borderRadius: 28, overflow: 'hidden', marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 12, elevation: 3 },
+  roomImage: { width: '100%', height: 220 },
+  cardBody: { padding: 20 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  roomName: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  greenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981', marginRight: 6 },
+  statusText: { color: '#10B981', fontSize: 11, fontWeight: '800' },
+  roomDesc: { fontSize: 14, color: '#64748B', lineHeight: 20, marginBottom: 20 },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 16 },
+  priceLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase' },
+  priceValue: { fontSize: 22, fontWeight: '800', color: '#4F46E5', marginTop: 2 },
+  bookBtn: { backgroundColor: '#0F172A', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16 },
+  bookBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+
+  emptyBox: { padding: 80, alignItems: 'center' },
+  emptyText: { color: '#94A3B8', marginTop: 12, textAlign: 'center' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 24, maxHeight: '90%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  modalTitle: { fontSize: 22, fontWeight: '800', color: '#0F172A' },
+  roomSummary: { flexDirection: 'row', padding: 12, backgroundColor: '#F8FAFC', borderRadius: 20, marginBottom: 24 },
+  summaryThumb: { width: 60, height: 60, borderRadius: 12 },
+  summaryInfo: { marginLeft: 16, justifyContent: 'center' },
+  summaryName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  summarySub: { fontSize: 13, color: '#64748B', marginTop: 2 },
+
+  formRow: { flexDirection: 'row', gap: 16, marginBottom: 16 },
+  formCol: { flex: 1 },
+  label: { fontSize: 14, fontWeight: '800', color: '#475569', marginBottom: 8, marginTop: 16 },
+  input: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 16, fontSize: 15, color: '#0F172A', fontWeight: '600' },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  guestSelector: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', padding: 8, borderRadius: 16, justifyContent: 'space-between' },
+  stepBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  guestCountText: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  paymentSelector: { flexDirection: 'row', gap: 10 },
+  payBtn: { flex: 1, padding: 14, borderRadius: 16, backgroundColor: '#F1F5F9', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  payBtnActive: { borderColor: '#4F46E5', backgroundColor: '#EEF2FF' },
+  payText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
+  payTextActive: { color: '#4F46E5' },
+  priceCard: { backgroundColor: '#4F46E5', borderRadius: 24, padding: 20, marginTop: 32, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '700' },
+  totalValue: { color: '#FFFFFF', fontSize: 24, fontWeight: '800' },
+  confirmBtn: { backgroundColor: '#0F172A', padding: 20, borderRadius: 20, alignItems: 'center', marginTop: 24 },
+  confirmText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+});
