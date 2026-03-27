@@ -1,34 +1,33 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 
 const TABS = [
-  { key: 'dashboard', label: 'Home', icon: 'grid' },
-  { key: 'bookings', label: 'Bookings', icon: 'calendar' },
-  { key: 'rooms', label: 'Rooms', icon: 'key' },
-  { key: 'guests', label: 'Guests', icon: 'users' },
-  { key: 'billing', label: 'Billing', icon: 'credit-card' },
+  { key: 'dashboard', label: 'Home', icon: 'home-outline', activeIcon: 'home' },
+  { key: 'rooms', label: 'Rooms', icon: 'bed-outline', activeIcon: 'bed' },
+  { key: 'guests', label: 'Guests', icon: 'people-outline', activeIcon: 'people' },
+  { key: 'analytics', label: 'Analytics', icon: 'bar-chart-outline', activeIcon: 'bar-chart' },
 ];
 
 export default function BottomTabBar({ activeTab, setActiveTab }) {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: '#FFFFFF', borderTopColor: '#F0F0F0' }]}>
       <View style={styles.container}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
           return (
-            <TouchableOpacity 
-              key={tab.key} 
-              style={styles.tabButton} 
+            <TouchableOpacity
+              key={tab.key}
+              style={styles.tabButton}
               onPress={() => setActiveTab(tab.key)}
+              activeOpacity={0.7}
             >
-              <Feather 
-                name={tab.icon} 
-                size={22} 
-                color={isActive ? '#4F46E5' : '#94A3B8'} 
-                style={styles.icon}
+              <Ionicons
+                name={isActive ? tab.activeIcon : tab.icon}
+                size={24}
+                color={isActive ? '#4A5BCC' : '#8E8E93'}
               />
-              <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>
+              <Text style={[styles.label, { color: isActive ? '#4A5BCC' : '#8E8E93' }]}>
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -40,38 +39,24 @@ export default function BottomTabBar({ activeTab, setActiveTab }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    backgroundColor: '#FFFFFF',
+  safe: {
     borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 10,
   },
   container: {
     flexDirection: 'row',
-    height: 60,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: 10,
   },
   tabButton: {
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
+    paddingVertical: 6,
   },
-  icon: {
-    marginBottom: 4,
-  },
-  tabLabel: {
+  label: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
-  activeTabLabel: {
-    color: '#4F46E5',
-    fontWeight: '700',
+    fontWeight: '500',
+    marginTop: 2,
   },
 });

@@ -11,30 +11,47 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
     },
     password: {
       type: String,
-      required: true,
+      required: function () {
+        return this.provider === 'local';
+      },
+    },
+    phone: {
+      type: String,
+      default: '',
     },
     role: {
       type: String,
-      enum: ['admin', 'staff'],
-      default: 'staff',
+      enum: ['admin', 'staff', 'user'],
+      default: 'user',
+    },
+    provider: {
+      type: String,
+      enum: ['local', 'google'],
+      default: 'local',
+    },
+    googleId: {
+      type: String,
+      default: null,
     },
   },
   { timestamps: true }
 );
 
-// Hash password before saving
+// Hash password before saving (only for local users)
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
-  const salt = await bcrypt.genSalt(10);
+  if (!this.isModified('password') || !this.password) return next();
+  const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
 // Match user entered password to hashed password in database
 userSchema.methods.matchPassword = async function (enteredPassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

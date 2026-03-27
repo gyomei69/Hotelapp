@@ -38,6 +38,7 @@ export const updateRoom = async (req, res) => {
       room.price = req.body.price || room.price;
       room.status = req.body.status || room.status;
       room.features = req.body.features || room.features;
+      room.imageUrl = req.body.imageUrl || room.imageUrl;
 
       const updatedRoom = await room.save();
       res.json(updatedRoom);
