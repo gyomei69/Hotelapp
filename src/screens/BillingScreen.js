@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Platform, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Platform, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { getBookings } from '../services/api';
+import { showActionError } from '../utils/errorHandling';
 
 const { width } = Dimensions.get('window');
 
@@ -45,6 +47,7 @@ export default function BillingScreen() {
       setTransactions(formattedTxs);
     } catch (error) {
       console.error('Failed to load billing:', error);
+      showActionError('Billing Error', error, 'Unable to load billing data right now.');
     } finally {
       setLoading(false);
     }
@@ -71,18 +74,18 @@ export default function BillingScreen() {
           <View style={styles.revenueCard}>
             <View style={styles.revHeader}>
               <Text style={styles.revLabel}>Total Estimated Revenue</Text>
-              <Text style={styles.revValue}>${metrics.total.toLocaleString()}</Text>
+              <Text style={styles.revValue}>₱{metrics.total.toLocaleString()}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.revFooter}>
               <View style={styles.revStat}>
                 <Text style={styles.statLabel}>RECEIVED</Text>
-                <Text style={[styles.statValue, { color: '#10B981' }]}>${metrics.paid.toLocaleString()}</Text>
+                <Text style={[styles.statValue, { color: '#10B981' }]}>₱{metrics.paid.toLocaleString()}</Text>
               </View>
               <View style={styles.vertDivider} />
               <View style={styles.revStat}>
                 <Text style={styles.statLabel}>PENDING</Text>
-                <Text style={[styles.statValue, { color: '#F59E0B' }]}>${metrics.pending.toLocaleString()}</Text>
+                <Text style={[styles.statValue, { color: '#F59E0B' }]}>₱{metrics.pending.toLocaleString()}</Text>
               </View>
             </View>
           </View>
@@ -100,7 +103,7 @@ export default function BillingScreen() {
                   <Text style={styles.txSub}>Inv #{tx.id} • Room {tx.room}</Text>
                 </View>
                 <View style={styles.txRight}>
-                  <Text style={styles.txAmt}>${tx.amount.toLocaleString()}</Text>
+                  <Text style={styles.txAmt}>₱{tx.amount.toLocaleString()}</Text>
                   <View style={[styles.badge, tx.status === 'Paid' ? styles.bgPaid : styles.bgPending]}>
                     <Text style={[styles.badgeText, tx.status === 'Paid' ? styles.textPaid : styles.textPending]}>{tx.status}</Text>
                   </View>

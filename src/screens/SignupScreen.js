@@ -1,17 +1,23 @@
 import React, { useState, useRef } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity, SafeAreaView,
-  KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator,
+  StyleSheet, Text, View, TouchableOpacity,
+  KeyboardAvoidingView, ScrollView, Platform, useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import AuthInput from '../components/AuthInput';
 import AuthButton from '../components/AuthButton';
+import RecaptchaModal from '../components/RecaptchaModal';
+import { shouldSkipRecaptchaWebView, DEV_RECAPTCHA_TOKEN } from '../utils/recaptchaDev';
 
 const validateEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
 export default function SignupScreen({ navigation }) {
   const { register } = useAuth();
+  const { height, width } = useWindowDimensions();
+  const isCompact = height < 760;
+  const sidePadding = width < 360 ? 20 : 28;
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -23,6 +29,7 @@ export default function SignupScreen({ navigation }) {
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [signupError, setSignupError] = useState('');
+  const [recaptchaOpen, setRecaptchaOpen] = useState(false);
 
   const emailRef = useRef(null);
   const phoneRef = useRef(null);
@@ -47,12 +54,20 @@ export default function SignupScreen({ navigation }) {
     return Object.keys(e).length === 0;
   };
 
-  const handleSignup = async () => {
+  const handleSignup = () => {
     setSignupError('');
     if (!validate()) return;
+    if (shouldSkipRecaptchaWebView()) {
+      handleRecaptchaToken(DEV_RECAPTCHA_TOKEN);
+      return;
+    }
+    setRecaptchaOpen(true);
+  };
+
+  const handleRecaptchaToken = async (token) => {
     setIsLoading(true);
     try {
-      await register(name.trim(), email.trim(), password, phone.trim());
+      await register(name.trim(), email.trim(), password, phone.trim(), token);
     } catch (error) {
       setSignupError(error.message || 'Something went wrong');
     } finally {
@@ -64,12 +79,29 @@ export default function SignupScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <RecaptchaModal
+        visible={recaptchaOpen}
+        onClose={() => setRecaptchaOpen(false)}
+        onToken={handleRecaptchaToken}
+        onError={() =>
+          setSignupError(
+            'Security check failed. For dev: set RECAPTCHA_DEV_BYPASS=1 in HotelBackend/.env and restart API; or fix reCAPTCHA keys in Google admin.'
+          )
+        }
+      />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              paddingHorizontal: sidePadding,
+              paddingTop: Platform.OS === 'android' ? (isCompact ? 24 : 44) : (isCompact ? 8 : 16),
+              paddingBottom: isCompact ? 20 : 32,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -82,10 +114,10 @@ export default function SignupScreen({ navigation }) {
           </TouchableOpacity>
 
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { marginBottom: isCompact ? 20 : 28 }]}>
             <Text style={styles.title}>Create Account</Text>
             <Text style={styles.subtitle}>
-              Sign up to get started with{'\n'}Francis Hotel
+              Sign up to get started with{'\n'}Aurora Grand Hotel
             </Text>
           </View>
 
@@ -113,7 +145,7 @@ export default function SignupScreen({ navigation }) {
             />
             {errors.name ? <Text style={styles.fieldError}>{errors.name}</Text> : null}
 
-            <View style={{ height: 16 }} />
+            <View style={{ height: isCompact ? 10 : 16 }} />
 
             {/* Email */}
             <Text style={styles.label}>Email Address</Text>
@@ -130,7 +162,7 @@ export default function SignupScreen({ navigation }) {
             />
             {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}
 
-            <View style={{ height: 16 }} />
+            <View style={{ height: isCompact ? 10 : 16 }} />
 
             {/* Phone Number */}
             <Text style={styles.label}>Phone Number</Text>
@@ -145,7 +177,7 @@ export default function SignupScreen({ navigation }) {
               onSubmitEditing={() => passwordRef.current?.focus()}
             />
 
-            <View style={{ height: 16 }} />
+            <View style={{ height: isCompact ? 10 : 16 }} />
 
             {/* Password */}
             <Text style={styles.label}>Password</Text>
@@ -165,7 +197,7 @@ export default function SignupScreen({ navigation }) {
             />
             {errors.password ? <Text style={styles.fieldError}>{errors.password}</Text> : null}
 
-            <View style={{ height: 16 }} />
+            <View style={{ height: isCompact ? 10 : 16 }} />
 
             {/* Confirm Password */}
             <Text style={styles.label}>Confirm Password</Text>
@@ -187,7 +219,7 @@ export default function SignupScreen({ navigation }) {
           </View>
 
           {/* Create Account Button */}
-          <View style={styles.buttonContainer}>
+          <View style={[styles.buttonContainer, { marginTop: isCompact ? 20 : 28 }]}>
             <AuthButton
               title="Create Account"
               onPress={handleSignup}
@@ -197,7 +229,7 @@ export default function SignupScreen({ navigation }) {
           </View>
 
           {/* Footer */}
-          <View style={styles.footer}>
+          <View style={[styles.footer, { marginTop: isCompact ? 16 : 24 }]}>
             <Text style={styles.footerText}>Already have an account? </Text>
             <TouchableOpacity onPress={() => navigation.navigate('Login')}>
               <Text style={styles.footerLink}>Sign In</Text>
@@ -257,43 +289,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 8,
     flex: 1,
-  },
-  googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
-    paddingVertical: 14,
-    borderWidth: 1.5,
-    borderColor: '#E0E0E3',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-    marginBottom: 4,
-  },
-  googleBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1B2036',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E0E0E3',
-  },
-  dividerText: {
-    paddingHorizontal: 16,
-    fontSize: 13,
-    color: '#8E8E93',
-    fontWeight: '500',
   },
   form: {},
   label: {

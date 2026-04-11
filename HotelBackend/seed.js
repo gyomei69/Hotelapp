@@ -8,8 +8,14 @@ import User from './models/User.js';
 import Room from './models/Room.js';
 import Guest from './models/Guest.js';
 import Booking from './models/Booking.js';
+import Housekeeping from './models/Housekeeping.js';
+import Feedback from './models/Feedback.js';
 
 dotenv.config();
+
+/** Must match `DELUXE_ROOM_IMAGE_URL` in app `src/utils/roomImages.js` (Unsplash id must stay valid). */
+const DELUXE_IMAGE =
+  'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1200&q=85';
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt')
   .then(async () => {
@@ -20,10 +26,12 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
     await Room.deleteMany();
     await Guest.deleteMany();
     await Booking.deleteMany();
+    await Housekeeping.deleteMany();
+    await Feedback.deleteMany();
 
-    // Create Admin and Staff
+    // Super admin + staff + guest
     const adminUser = await User.create({
-      name: 'Admin User',
+      name: 'Super Admin',
       email: 'admin@hotel.com',
       password: 'password123',
       role: 'admin',
@@ -37,55 +45,58 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
     });
 
     const standardUser = await User.create({
-      name: 'Standard User',
+      name: 'Guest User',
       email: 'user@hotel.com',
       password: 'password123',
-      role: 'user',
+      role: 'guest',
     });
 
-    // Create Rooms
+    // Create Rooms (Standard 101 removed per product spec — keep 102 and others)
     const rooms = await Room.insertMany([
-      {
-        roomNumber: '101',
-        type: 'Standard',
-        price: 150,
-        status: 'Available',
-        description: 'A cozy and modern room with a queen-sized bed, perfect for solo travelers or couples. Includes high-speed WiFi and a smart TV.',
-        imageUrl: 'https://images.unsplash.com/photo-1598928506311-c55ded91a20c?auto=format&fit=crop&w=800&q=80'
-      },
       {
         roomNumber: '102',
         type: 'Standard',
         price: 150,
+        capacity: 2,
         status: 'Available',
         description: 'Bright and airy standard room with garden views. Features a dedicated workspace and premium linens.',
-        imageUrl: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80'
+        imageUrl: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80',
       },
       {
         roomNumber: '201',
         type: 'Deluxe',
         price: 250,
+        capacity: 3,
         status: 'Available',
         description: 'Spacious deluxe room with a king-sized bed and a private balcony. Experience luxury with a walk-in rain shower and plush bathrobes.',
-        imageUrl: 'https://images.unsplash.com/photo-1591088398332-8a77d399c843?auto=format&fit=crop&w=800&q=80'
+        imageUrl: DELUXE_IMAGE,
       },
       {
         roomNumber: '301',
         type: 'Suite',
         price: 400,
+        capacity: 4,
         status: 'Available',
         description: 'Elegant suite featuring a separate living area and panoramic city views. The ultimate choice for business or leisure travelers seeking extra space.',
-        imageUrl: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80'
+        imageUrl: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
       },
       {
         roomNumber: '401',
         type: 'Penthouse',
         price: 850,
+        capacity: 6,
         status: 'Available',
         description: 'The pinnacle of luxury. Our top-floor penthouse offers a private terrace, personal butler service, and a fully-equipped gourmet kitchen.',
-        imageUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80'
+        imageUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
       },
     ]);
+
+    await Housekeeping.insertMany(
+      rooms.map((r) => ({
+        room: r._id,
+        status: 'clean',
+      }))
+    );
 
     // Create Guests
     const guests = await Guest.insertMany([
@@ -95,29 +106,29 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
 
     // Create Bookings (linked to user and guest)
     await Booking.create([
-       {
-         user: standardUser._id,
-         guest: guests[0]._id,
-         room: rooms[1]._id,
-         checkInDate: new Date(new Date().getTime() + 1 * 24 * 60 * 60 * 1000), // tomorrow
-         checkOutDate: new Date(new Date().getTime() + 4 * 24 * 60 * 60 * 1000), // +4 days
-         totalAmount: 450,
-         guestCount: 2,
-         paymentMethod: 'Card',
-         specialRequests: 'Late check-in please',
-         status: 'Pending'
-       },
-       {
-         user: standardUser._id,
-         guest: guests[0]._id,
-         room: rooms[2]._id,
-         checkInDate: new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000), // +7 days
-         checkOutDate: new Date(new Date().getTime() + 10 * 24 * 60 * 60 * 1000), // +10 days
-         totalAmount: 750,
-         guestCount: 1,
-         paymentMethod: 'Online',
-         status: 'Approved'
-       }
+      {
+        user: standardUser._id,
+        guest: guests[0]._id,
+        room: rooms[0]._id,
+        checkInDate: new Date(new Date().getTime() + 1 * 24 * 60 * 60 * 1000),
+        checkOutDate: new Date(new Date().getTime() + 4 * 24 * 60 * 60 * 1000),
+        totalAmount: 450,
+        guestCount: 2,
+        paymentMethod: 'Card',
+        specialRequests: 'Late check-in please',
+        status: 'Pending',
+      },
+      {
+        user: standardUser._id,
+        guest: guests[0]._id,
+        room: rooms[1]._id,
+        checkInDate: new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000),
+        checkOutDate: new Date(new Date().getTime() + 10 * 24 * 60 * 60 * 1000),
+        totalAmount: 750,
+        guestCount: 1,
+        paymentMethod: 'Card',
+        status: 'Approved',
+      },
     ]);
 
     console.log('✅ Base Data Imported Successfully!');

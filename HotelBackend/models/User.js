@@ -25,8 +25,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'staff', 'user'],
-      default: 'user',
+      enum: ['admin', 'staff', 'guest'],
+      default: 'guest',
     },
     provider: {
       type: String,
@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema(
     googleId: {
       type: String,
       default: null,
+      sparse: true,
     },
   },
   { timestamps: true }

@@ -16,10 +16,20 @@ const roomSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    capacity: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 4,
+    },
+    description: {
+      type: String,
+      default: '',
+    },
     status: {
       type: String,
       required: true,
-      enum: ['Available', 'Occupied', 'Cleaning', 'Maintenance'],
+      enum: ['Available', 'Occupied', 'Cleaning', 'Maintenance', 'Unavailable'],
       default: 'Available',
     },
     features: [String],

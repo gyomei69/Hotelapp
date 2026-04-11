@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Platform, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Platform, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { getGuests, createGuest, updateGuest, deleteGuest } from '../services/api';
+import { showActionError } from '../utils/errorHandling';
 
 export default function GuestsScreen() {
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
   const [editingGuest, setEditingGuest] = useState(null);
@@ -25,6 +26,7 @@ export default function GuestsScreen() {
       setGuests(data.reverse()); // Newest first
     } catch (error) {
       console.error('Failed to load guests:', error);
+      showActionError('Guests Error', error, 'Unable to load guests right now.');
     } finally {
       setLoading(false);
     }
@@ -60,7 +62,11 @@ export default function GuestsScreen() {
       setModalVisible(false);
       loadGuests();
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to process guest');
+      showActionError(
+        editingGuest ? 'Update Failed' : 'Create Failed',
+        error,
+        'Unable to save guest details.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -74,17 +80,11 @@ export default function GuestsScreen() {
           await deleteGuest(id);
           loadGuests();
         } catch (error) {
-          Alert.alert('Error', error.message);
+          showActionError('Delete Failed', error, 'Unable to delete guest right now.');
         }
       }}
     ]);
   };
-
-  const filteredGuests = guests.filter(guest => 
-    guest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    guest.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (guest.phone && guest.phone.includes(searchQuery))
-  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -98,25 +98,13 @@ export default function GuestsScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.searchBox}>
-        <View style={styles.searchBar}>
-          <Feather name="search" size={20} color="#94A3B8" />
-          <TextInput 
-            style={styles.searchInput}
-            placeholder="Search name, email or phone..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-      </View>
-
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color="#4F46E5" />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {filteredGuests.map(guest => (
+          {guests.map(guest => (
             <View key={guest._id} style={styles.card}>
               <View style={styles.cardTop}>
                 <View style={styles.avatar}>

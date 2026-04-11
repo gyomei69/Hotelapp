@@ -19,10 +19,20 @@ export const protect = async (req, res, next) => {
   }
 };
 
-export const admin = (req, res, next) => {
+/** Super admin only — full system control. */
+export const requireAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
-    res.status(403).json({ message: 'Not authorized as an admin' });
+    res.status(403).json({ message: 'Super admin access required' });
+  }
+};
+
+/** Staff or super admin — operational hotel tools (bookings list, payments, check-in, etc.). */
+export const requireStaffAccess = (req, res, next) => {
+  if (req.user && (req.user.role === 'admin' || req.user.role === 'staff')) {
+    next();
+  } else {
+    res.status(403).json({ message: 'Staff access required' });
   }
 };

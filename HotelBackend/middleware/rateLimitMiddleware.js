@@ -29,6 +29,17 @@ export const registerLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// ── Password reset (forgot password) ─────────────────────────────────
+export const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: {
+    message: 'Too many reset attempts. Please try again after 15 minutes.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── General API Rate Limiter ─────────────────────────────────────────
 // Max 100 requests per IP per 15 minutes for all API endpoints
 export const apiLimiter = rateLimit({

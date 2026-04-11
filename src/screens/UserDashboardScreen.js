@@ -1,11 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Platform, TouchableOpacity, ActivityIndicator, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Platform, TouchableOpacity, ActivityIndicator, Image, Modal, TextInput, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather } from '@expo/vector-icons';
 import { getRooms, createBooking } from '../services/api';
+import { getRoomImageSource } from '../utils/roomImages';
+import { showActionError } from '../utils/errorHandling';
+import { useAuth } from '../context/AuthContext';
+import NotificationBell from '../components/NotificationBell';
 
-const { width } = Dimensions.get('window');
+const formatYmd = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const parseYmd = (s) => {
+  if (!s || typeof s !== 'string') return new Date();
+  const parts = s.split('-').map(Number);
+  if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return new Date();
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+};
+
+const startOfDay = (d) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
 
 export default function UserDashboardScreen({ setActiveTab }) {
+  const { user } = useAuth();
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -16,10 +41,10 @@ export default function UserDashboardScreen({ setActiveTab }) {
     checkInDate: '',
     checkOutDate: '',
     guestCount: 1,
-    paymentMethod: 'Cash',
     specialRequests: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const [datePicker, setDatePicker] = useState(null);
 
   useEffect(() => {
     loadAvailableRooms();
@@ -32,6 +57,7 @@ export default function UserDashboardScreen({ setActiveTab }) {
       setRooms(allRooms.filter(r => r.status === 'Available'));
     } catch (error) {
       console.error('Failed to load rooms:', error);
+      showActionError('Rooms Unavailable', error, 'Unable to load available rooms right now.');
     } finally {
       setLoading(false);
     }
@@ -43,7 +69,6 @@ export default function UserDashboardScreen({ setActiveTab }) {
       checkInDate: new Date().toISOString().split('T')[0],
       checkOutDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
       guestCount: 1,
-      paymentMethod: 'Cash',
       specialRequests: ''
     });
     setModalVisible(true);
@@ -58,33 +83,149 @@ export default function UserDashboardScreen({ setActiveTab }) {
     return (diffDays || 1) * selectedRoom.price;
   };
 
+  const roomCapacity = (room) =>
+    typeof room?.capacity === 'number' && room.capacity > 0 ? room.capacity : 4;
+
+  const minCheckoutDate = () => {
+    const base = bookingData.checkInDate
+      ? parseYmd(bookingData.checkInDate)
+      : startOfDay(new Date());
+    const d = new Date(startOfDay(base));
+    d.setDate(d.getDate() + 1);
+    return d;
+  };
+
+  const getPickerValue = () => {
+    if (datePicker?.field === 'checkOut') {
+      const minD = minCheckoutDate();
+      if (bookingData.checkOutDate) {
+        const d = startOfDay(parseYmd(bookingData.checkOutDate));
+        return d < minD ? minD : d;
+      }
+      return minD;
+    }
+    const minD = startOfDay(new Date());
+    if (bookingData.checkInDate) {
+      const d = startOfDay(parseYmd(bookingData.checkInDate));
+      return d < minD ? minD : d;
+    }
+    return minD;
+  };
+
+  const onChangeNativeDate = (event, selectedDate) => {
+    const field = datePicker?.field;
+    if (Platform.OS === 'android') {
+      setDatePicker(null);
+      if (event?.type === 'dismissed') return;
+    }
+    if (!selectedDate || !field) return;
+
+    const ymd = formatYmd(selectedDate);
+
+    if (field === 'checkIn') {
+      setBookingData((prev) => {
+        const inD = startOfDay(parseYmd(ymd));
+        let outStr = prev.checkOutDate;
+        if (outStr) {
+          const outD = startOfDay(parseYmd(outStr));
+          if (outD <= inD) {
+            const next = new Date(inD);
+            next.setDate(next.getDate() + 1);
+            outStr = formatYmd(next);
+          }
+        } else {
+          const next = new Date(inD);
+          next.setDate(next.getDate() + 1);
+          outStr = formatYmd(next);
+        }
+        return { ...prev, checkInDate: ymd, checkOutDate: outStr };
+      });
+    } else {
+      setBookingData((prev) => ({ ...prev, checkOutDate: ymd }));
+    }
+  };
+
   const handleConfirmBooking = async () => {
-    if (!bookingData.checkInDate || !bookingData.checkOutDate) {
-      Alert.alert('Error', 'Please select both dates');
+    if (!user?._id) {
+      Alert.alert('Error', 'You must be signed in to book.');
+      return;
+    }
+    if (!selectedRoom?._id) {
+      Alert.alert('Error', 'Please select a room.');
+      return;
+    }
+    if (!bookingData.checkInDate?.trim() || !bookingData.checkOutDate?.trim()) {
+      Alert.alert('Error', 'Please select both check-in and check-out dates.');
+      return;
+    }
+    const checkIn = new Date(bookingData.checkInDate);
+    const checkOut = new Date(bookingData.checkOutDate);
+    if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) {
+      Alert.alert('Error', 'Invalid date format. Use YYYY-MM-DD.');
+      return;
+    }
+    if (checkOut <= checkIn) {
+      Alert.alert('Error', 'Check-out must be later than check-in.');
+      return;
+    }
+
+    const today = startOfDay(new Date());
+    const checkInDay = startOfDay(checkIn);
+    if (checkInDay < today) {
+      Alert.alert('Error', 'Check-in date cannot be in the past.');
+      return;
+    }
+
+    const cap = roomCapacity(selectedRoom);
+    const guests = Number(bookingData.guestCount);
+    if (Number.isNaN(guests) || guests < 1) {
+      Alert.alert('Error', 'Number of guests must be at least 1.');
+      return;
+    }
+    if (guests > cap) {
+      Alert.alert('Error', `Number of guests cannot exceed room capacity (${cap}).`);
+      return;
+    }
+
+    const totalPrice = calculateTotal();
+    if (totalPrice <= 0) {
+      Alert.alert('Error', 'Unable to calculate total for these dates.');
       return;
     }
 
     setSubmitting(true);
     try {
       await createBooking({
+        user_id: user._id,
+        room_id: selectedRoom._id,
         room: selectedRoom._id,
-        ...bookingData
+        checkInDate: bookingData.checkInDate.trim(),
+        checkOutDate: bookingData.checkOutDate.trim(),
+        guestCount: guests,
+        specialRequests: bookingData.specialRequests || '',
+        total_price: totalPrice,
+        booking_status: 'Pending',
+        created_at: new Date().toISOString(),
       });
-      
-      Alert.alert('Success ✨', 'Your reservation is confirmed! Enjoy your stay.', [
-        { text: 'View My Bookings', onPress: () => {
+
+      Alert.alert('Success ✨', 'Your booking was submitted and is pending approval.', [
+        {
+          text: 'View My Bookings',
+          onPress: () => {
             setModalVisible(false);
             setActiveTab('mybookings');
-          }
+          },
         },
-        { text: 'Close', onPress: () => {
+        {
+          text: 'Close',
+          onPress: () => {
             setModalVisible(false);
             loadAvailableRooms();
-          }
-        }
+          },
+        },
       ]);
     } catch (error) {
-      Alert.alert('Booking Failed', error.message);
+      showActionError('Booking Failed', error, 'Unable to complete booking right now.');
     } finally {
       setSubmitting(false);
     }
@@ -93,6 +234,11 @@ export default function UserDashboardScreen({ setActiveTab }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={{ height: Platform.OS === 'android' ? 44 : 12 }} />
+      <View style={styles.notifyBar}>
+        <NotificationBell
+          onBookingNotificationPress={() => setActiveTab && setActiveTab('mybookings')}
+        />
+      </View>
 
       {loading ? (
         <View style={styles.centerBox}>
@@ -119,7 +265,7 @@ export default function UserDashboardScreen({ setActiveTab }) {
 
           {rooms.map(room => (
             <View key={room._id} style={styles.card}>
-              <Image source={{ uri: room.imageUrl }} style={styles.roomImage} />
+              <Image source={getRoomImageSource(room)} style={styles.roomImage} resizeMode="cover" />
               <View style={styles.cardBody}>
                 <View style={styles.cardHeader}>
                   <Text style={styles.roomName}>{room.type}</Text>
@@ -135,7 +281,7 @@ export default function UserDashboardScreen({ setActiveTab }) {
                 <View style={styles.cardFooter}>
                   <View>
                     <Text style={styles.priceLabel}>Price / Night</Text>
-                    <Text style={styles.priceValue}>${room.price}</Text>
+                    <Text style={styles.priceValue}>₱{room.price}</Text>
                   </View>
                   <TouchableOpacity style={styles.bookBtn} onPress={() => openBooking(room)}>
                     <Text style={styles.bookBtnText}>Book Now</Text>
@@ -169,7 +315,7 @@ export default function UserDashboardScreen({ setActiveTab }) {
             {selectedRoom && (
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.roomSummary}>
-                   <Image source={{ uri: selectedRoom.imageUrl }} style={styles.summaryThumb} />
+                   <Image source={getRoomImageSource(selectedRoom)} style={styles.summaryThumb} resizeMode="cover" />
                    <View style={styles.summaryInfo}>
                       <Text style={styles.summaryName}>{selectedRoom.type}</Text>
                       <Text style={styles.summarySub}>Room {selectedRoom.roomNumber}</Text>
@@ -179,23 +325,80 @@ export default function UserDashboardScreen({ setActiveTab }) {
                 <View style={styles.formRow}>
                    <View style={styles.formCol}>
                       <Text style={styles.label}>Check-in</Text>
-                      <TextInput 
-                        style={styles.input} 
-                        value={bookingData.checkInDate} 
-                        onChangeText={(t) => setBookingData({...bookingData, checkInDate: t})}
-                        placeholder="YYYY-MM-DD"
-                      />
+                      {Platform.OS === 'web' ? (
+                        <TextInput
+                          style={styles.input}
+                          value={bookingData.checkInDate}
+                          onChangeText={(t) => setBookingData({ ...bookingData, checkInDate: t })}
+                          placeholder="YYYY-MM-DD"
+                        />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.input}
+                          onPress={() => setDatePicker({ field: 'checkIn' })}
+                        >
+                          <Text style={styles.dateInputText}>
+                            {bookingData.checkInDate || 'Select date'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                    </View>
                    <View style={styles.formCol}>
                       <Text style={styles.label}>Check-out</Text>
-                      <TextInput 
-                        style={styles.input} 
-                        value={bookingData.checkOutDate} 
-                        onChangeText={(t) => setBookingData({...bookingData, checkOutDate: t})}
-                        placeholder="YYYY-MM-DD"
-                      />
+                      {Platform.OS === 'web' ? (
+                        <TextInput
+                          style={styles.input}
+                          value={bookingData.checkOutDate}
+                          onChangeText={(t) => setBookingData({ ...bookingData, checkOutDate: t })}
+                          placeholder="YYYY-MM-DD"
+                        />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.input}
+                          onPress={() => setDatePicker({ field: 'checkOut' })}
+                        >
+                          <Text style={styles.dateInputText}>
+                            {bookingData.checkOutDate || 'Select date'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                    </View>
                 </View>
+
+                {datePicker && Platform.OS === 'ios' ? (
+                  <View style={{ marginTop: 8 }}>
+                    <DateTimePicker
+                      value={getPickerValue()}
+                      mode="date"
+                      display="spinner"
+                      minimumDate={
+                        datePicker.field === 'checkIn'
+                          ? startOfDay(new Date())
+                          : minCheckoutDate()
+                      }
+                      onChange={onChangeNativeDate}
+                    />
+                    <TouchableOpacity
+                      style={[styles.confirmBtn, { marginTop: 12 }]}
+                      onPress={() => setDatePicker(null)}
+                    >
+                      <Text style={styles.confirmText}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+                {datePicker && Platform.OS === 'android' ? (
+                  <DateTimePicker
+                    value={getPickerValue()}
+                    mode="date"
+                    display="default"
+                    minimumDate={
+                      datePicker.field === 'checkIn'
+                        ? startOfDay(new Date())
+                        : minCheckoutDate()
+                    }
+                    onChange={onChangeNativeDate}
+                  />
+                ) : null}
 
                 <Text style={styles.label}>Guests</Text>
                 <View style={styles.guestSelector}>
@@ -207,24 +410,17 @@ export default function UserDashboardScreen({ setActiveTab }) {
                    </TouchableOpacity>
                    <Text style={styles.guestCountText}>{bookingData.guestCount}</Text>
                    <TouchableOpacity 
-                     onPress={() => setBookingData({...bookingData, guestCount: bookingData.guestCount + 1})}
+                     onPress={() => {
+                       const maxG = roomCapacity(selectedRoom);
+                       setBookingData({
+                         ...bookingData,
+                         guestCount: Math.min(maxG, bookingData.guestCount + 1),
+                       });
+                     }}
                      style={styles.stepBtn}
                    >
                      <Feather name="plus" size={20} color="#1E293B" />
                    </TouchableOpacity>
-                </View>
-
-                <Text style={styles.label}>Payment Method</Text>
-                <View style={styles.paymentSelector}>
-                   {['Cash', 'Card', 'Online'].map(m => (
-                     <TouchableOpacity 
-                       key={m} 
-                       style={[styles.payBtn, bookingData.paymentMethod === m && styles.payBtnActive]}
-                       onPress={() => setBookingData({...bookingData, paymentMethod: m})}
-                      >
-                       <Text style={[styles.payText, bookingData.paymentMethod === m && styles.payTextActive]}>{m}</Text>
-                     </TouchableOpacity>
-                   ))}
                 </View>
 
                 <Text style={styles.label}>Special Requests</Text>
@@ -238,7 +434,7 @@ export default function UserDashboardScreen({ setActiveTab }) {
 
                 <View style={styles.priceCard}>
                    <Text style={styles.totalLabel}>Estimated Total</Text>
-                   <Text style={styles.totalValue}>${calculateTotal()}</Text>
+                   <Text style={styles.totalValue}>₱{calculateTotal()}</Text>
                 </View>
 
                 <TouchableOpacity 
@@ -260,6 +456,12 @@ export default function UserDashboardScreen({ setActiveTab }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
+  notifyBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
   header: { padding: 24, paddingBottom: 16, flexDirection: 'row', alignItems: 'center' },
   headerTitleContainer: { flex: 1, alignItems: 'center', marginLeft: 44 }, // Offset the profile button width to center perfectly
   greeting: { fontSize: 13, fontWeight: '600', color: '#8B5CF6', textTransform: 'uppercase', letterSpacing: 3, fontStyle: 'italic' },
@@ -312,15 +514,11 @@ const styles = StyleSheet.create({
   formCol: { flex: 1 },
   label: { fontSize: 14, fontWeight: '800', color: '#475569', marginBottom: 8, marginTop: 16 },
   input: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 16, fontSize: 15, color: '#0F172A', fontWeight: '600' },
+  dateInputText: { fontSize: 15, color: '#0F172A', fontWeight: '600' },
   textArea: { height: 80, textAlignVertical: 'top' },
   guestSelector: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', padding: 8, borderRadius: 16, justifyContent: 'space-between' },
   stepBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   guestCountText: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
-  paymentSelector: { flexDirection: 'row', gap: 10 },
-  payBtn: { flex: 1, padding: 14, borderRadius: 16, backgroundColor: '#F1F5F9', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
-  payBtnActive: { borderColor: '#4F46E5', backgroundColor: '#EEF2FF' },
-  payText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
-  payTextActive: { color: '#4F46E5' },
   priceCard: { backgroundColor: '#4F46E5', borderRadius: 24, padding: 20, marginTop: 32, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '700' },
   totalValue: { color: '#FFFFFF', fontSize: 24, fontWeight: '800' },

@@ -73,7 +73,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F7',
     borderRadius: 28,
     paddingHorizontal: 18,
-    height: 52,
+    minHeight: 52,
     borderWidth: 1,
     borderColor: '#E8E8E8',
   },
@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#1B2036',
-    paddingVertical: Platform.OS === 'ios' ? 14 : 10,
+    paddingVertical: Platform.OS === 'ios' ? 14 : 12,
   },
   eyeBtn: {
     padding: 4,

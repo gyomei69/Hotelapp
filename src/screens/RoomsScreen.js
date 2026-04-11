@@ -1,24 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, SafeAreaView, Platform,
+  StyleSheet, Text, View, ScrollView, Platform,
   TouchableOpacity, ActivityIndicator, Image, Modal, TextInput,
   Alert, Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getRooms, createRoom, updateRoom, deleteRoom } from '../services/api';
+import { getRoomImageSource } from '../utils/roomImages';
+import { showActionError } from '../utils/errorHandling';
+import NotificationBell from '../components/NotificationBell';
+import { useAuth } from '../context/AuthContext';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-export default function RoomsScreen() {
+export default function RoomsScreen({ onNavigate, setActiveTab }) {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'admin';
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
   const [editingRoom, setEditingRoom] = useState(null);
   const [formData, setFormData] = useState({
     roomNumber: '', type: 'Standard', price: '', status: 'Available', imageUrl: '',
+    capacity: '4', description: '',
   });
 
   useEffect(() => { loadRooms(); }, []);
@@ -30,14 +37,23 @@ export default function RoomsScreen() {
       setRooms(data);
     } catch (e) {
       console.error('Failed to load rooms:', e);
+      showActionError('Rooms Error', e, 'Unable to load rooms right now.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleAddPress = () => {
+    if (!isSuperAdmin) return;
+    if (onNavigate) {
+      onNavigate('createRoom');
+      return;
+    }
     setEditingRoom(null);
-    setFormData({ roomNumber: '', type: 'Standard', price: '', status: 'Available', imageUrl: '' });
+    setFormData({
+      roomNumber: '', type: 'Standard', price: '', status: 'Available', imageUrl: '',
+      capacity: '4', description: '',
+    });
     setModalVisible(true);
   };
   const handleEditPress = (room) => {
@@ -45,6 +61,8 @@ export default function RoomsScreen() {
     setFormData({
       roomNumber: room.roomNumber, type: room.type,
       price: room.price.toString(), status: room.status, imageUrl: room.imageUrl || '',
+      capacity: String(room.capacity != null ? room.capacity : 4),
+      description: room.description || '',
     });
     setModalVisible(true);
   };
@@ -53,21 +71,43 @@ export default function RoomsScreen() {
       Alert.alert('Error', 'Please fill in room number and price.');
       return;
     }
+    const cap = Number(formData.capacity);
+    if (Number.isNaN(cap) || cap < 1) {
+      Alert.alert('Error', 'Please enter a valid capacity (at least 1).');
+      return;
+    }
+    const payload = {
+      ...formData,
+      price: Number(formData.price),
+      capacity: cap,
+      description: formData.description || '',
+    };
     try {
       if (editingRoom) {
-        await updateRoom(editingRoom._id, formData);
+        await updateRoom(editingRoom._id, payload);
       } else {
-        await createRoom(formData);
+        await createRoom(payload);
       }
       setModalVisible(false);
       loadRooms();
-    } catch (e) { Alert.alert('Error', e.message); }
+    } catch (e) {
+      showActionError(
+        editingRoom ? 'Update Failed' : 'Create Failed',
+        e,
+        'Unable to save room. Please try again.'
+      );
+    }
   };
   const handleDelete = (id) => {
     Alert.alert('Delete Room', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        try { await deleteRoom(id); loadRooms(); } catch (e) { Alert.alert('Error', e.message); }
+        try {
+          await deleteRoom(id);
+          loadRooms();
+        } catch (e) {
+          showActionError('Delete Failed', e, 'Unable to delete room. Please try again.');
+        }
       }},
     ]);
   };
@@ -75,15 +115,6 @@ export default function RoomsScreen() {
   const total = rooms.length;
   const availCount = rooms.filter(r => r.status === 'Available').length;
   const occCount = rooms.filter(r => r.status === 'Occupied').length;
-
-  const filteredRooms = rooms.filter(r => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      r.roomNumber?.toLowerCase().includes(q) ||
-      r.type?.toLowerCase().includes(q)
-    );
-  });
 
   const amenities = ['WiFi', 'TV', 'Mini Bar', 'Ocean View'];
 
@@ -93,24 +124,16 @@ export default function RoomsScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <Text style={styles.title}>Rooms & Booking</Text>
-          <TouchableOpacity style={styles.addFab} onPress={handleAddPress}>
-            <Ionicons name="add" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Search bar */}
-        <View style={styles.searchBar}>
-          <Ionicons name="search-outline" size={20} color="#8E8E93" style={{ marginRight: 10 }} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search rooms..."
-            placeholderTextColor="#B0B0B5"
-            value={search}
-            onChangeText={setSearch}
-          />
-          <TouchableOpacity>
-            <Ionicons name="options-outline" size={20} color="#1B2036" />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <NotificationBell
+              onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+            />
+            {isSuperAdmin ? (
+              <TouchableOpacity style={styles.addFab} onPress={handleAddPress}>
+                <Ionicons name="add" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
 
         {/* Summary pills */}
@@ -132,12 +155,12 @@ export default function RoomsScreen() {
         {loading ? (
           <View style={styles.center}><ActivityIndicator size="large" color="#4A5BCC" /></View>
         ) : (
-          filteredRooms.map((room) => (
+          rooms.map((room) => (
             <View key={room._id} style={styles.roomCard}>
               {/* Image */}
               <View style={styles.imageContainer}>
                 <Image
-                  source={{ uri: room.imageUrl || 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=600&q=80' }}
+                  source={getRoomImageSource(room)}
                   style={styles.roomImage}
                 />
                 <View style={styles.statusTag}>
@@ -166,7 +189,7 @@ export default function RoomsScreen() {
                 <View style={styles.tagsRow}>
                   <View style={styles.capacityTag}>
                     <Ionicons name="people-outline" size={14} color="#8E8E93" />
-                    <Text style={styles.capacityText}>Up to 3</Text>
+                    <Text style={styles.capacityText}>Up to {room.capacity != null ? room.capacity : 4}</Text>
                   </View>
                   <View style={styles.typeTag}>
                     <Text style={styles.typeTagText}>{room.type}</Text>
@@ -182,31 +205,24 @@ export default function RoomsScreen() {
                   ))}
                 </View>
 
-                {/* Book Now + Admin actions */}
-                <View style={styles.actionsRow}>
-                  <TouchableOpacity style={styles.bookBtn} activeOpacity={0.8}>
-                    <Ionicons name="add" size={18} color="#FFFFFF" />
-                    <Text style={styles.bookBtnText}>Book Now</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Admin actions (Edit / Delete) */}
-                <View style={styles.adminRow}>
-                  <TouchableOpacity onPress={() => handleEditPress(room)} style={styles.adminBtn}>
-                    <Ionicons name="pencil" size={16} color="#4A5BCC" />
-                    <Text style={styles.adminBtnText}>Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDelete(room._id)} style={styles.adminBtn}>
-                    <Ionicons name="trash-outline" size={16} color="#EF4444" />
-                    <Text style={[styles.adminBtnText, { color: '#EF4444' }]}>Delete</Text>
-                  </TouchableOpacity>
-                </View>
+                {isSuperAdmin ? (
+                  <View style={styles.staffRow}>
+                    <TouchableOpacity onPress={() => handleEditPress(room)} style={styles.staffBtn}>
+                      <Ionicons name="pencil" size={16} color="#4A5BCC" />
+                      <Text style={styles.staffBtnText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(room._id)} style={styles.staffBtn}>
+                      <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                      <Text style={[styles.staffBtnText, { color: '#EF4444' }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
               </View>
             </View>
           ))
         )}
 
-        {filteredRooms.length === 0 && !loading && (
+        {rooms.length === 0 && !loading && (
           <View style={styles.emptyBox}>
             <Ionicons name="bed-outline" size={48} color="#8E8E93" />
             <Text style={[styles.emptyText, { color: '#8E8E93' }]}>No rooms found</Text>
@@ -230,7 +246,7 @@ export default function RoomsScreen() {
               <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Room Number *</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: '#F1F5F9', color: '#1B2036', borderColor: '#F0F0F2' }]}
-                placeholder="e.g. 101"
+                placeholder="e.g. 102"
                 placeholderTextColor="#8E8E93"
                 value={formData.roomNumber}
                 onChangeText={(t) => setFormData(p => ({ ...p, roomNumber: t }))}
@@ -256,7 +272,7 @@ export default function RoomsScreen() {
                 ))}
               </View>
 
-              <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Price per night ($) *</Text>
+              <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Price per night (₱) *</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: '#F1F5F9', color: '#1B2036', borderColor: '#F0F0F2' }]}
                 placeholder="e.g. 150"
@@ -264,6 +280,26 @@ export default function RoomsScreen() {
                 keyboardType="numeric"
                 value={formData.price}
                 onChangeText={(t) => setFormData(p => ({ ...p, price: t }))}
+              />
+
+              <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Capacity *</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#F1F5F9', color: '#1B2036', borderColor: '#F0F0F2' }]}
+                placeholder="Max guests"
+                placeholderTextColor="#8E8E93"
+                keyboardType="numeric"
+                value={formData.capacity}
+                onChangeText={(t) => setFormData(p => ({ ...p, capacity: t }))}
+              />
+
+              <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Description</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#F1F5F9', color: '#1B2036', borderColor: '#F0F0F2', minHeight: 80, textAlignVertical: 'top' }]}
+                placeholder="Room description..."
+                placeholderTextColor="#8E8E93"
+                multiline
+                value={formData.description}
+                onChangeText={(t) => setFormData(p => ({ ...p, description: t }))}
               />
 
               <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Image URL</Text>
@@ -277,7 +313,7 @@ export default function RoomsScreen() {
 
               <Text style={[styles.inputLabel, { color: '#8E8E93' }]}>Status</Text>
               <View style={styles.statusRow}>
-                {['Available', 'Occupied', 'Maintenance'].map(s => (
+                {['Available', 'Occupied', 'Maintenance', 'Unavailable'].map(s => (
                   <TouchableOpacity
                     key={s}
                     style={[
@@ -312,6 +348,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, paddingTop: Platform.OS === 'android' ? 44 : 12 },
 
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 24, fontWeight: '700', color: '#1B2036' },
   addFab: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#4A5BCC', justifyContent: 'center', alignItems: 'center' },
 
@@ -330,7 +367,7 @@ const styles = StyleSheet.create({
 
   roomCard: { backgroundColor: '#FFFFFF', borderRadius: 16, marginBottom: 18, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   imageContainer: { position: 'relative' },
-  roomImage: { width: '100%', height: 180, backgroundColor: '#E8E8E8' },
+  roomImage: { width: '100%', height: 180, backgroundColor: '#E8E8E8', resizeMode: 'cover' },
   statusTag: { position: 'absolute', top: 12, left: 12, backgroundColor: '#E8FFF0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   statusTagText: { color: '#34C759', fontSize: 11, fontWeight: '600' },
   ratingTag: { position: 'absolute', bottom: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, gap: 3 },
@@ -353,13 +390,9 @@ const styles = StyleSheet.create({
   amenityChip: { borderWidth: 1, borderColor: '#E8E8E8', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   amenityText: { fontSize: 11, color: '#8E8E93' },
 
-  actionsRow: { marginBottom: 8 },
-  bookBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1B2036', borderRadius: 14, paddingVertical: 13, gap: 6 },
-  bookBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-
-  adminRow: { flexDirection: 'row', justifyContent: 'center', gap: 24, marginTop: 8 },
-  adminBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 6 },
-  adminBtnText: { fontSize: 13, color: '#4A5BCC', fontWeight: '500' },
+  staffRow: { flexDirection: 'row', justifyContent: 'center', gap: 24, marginTop: 8 },
+  staffBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 6 },
+  staffBtnText: { fontSize: 13, color: '#4A5BCC', fontWeight: '500' },
 
   emptyBox: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { color: '#8E8E93', marginTop: 8 },
@@ -370,6 +403,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: '700', color: '#1B2036' },
   inputLabel: { fontSize: 13, fontWeight: '600', color: '#1B2036', marginBottom: 8, marginTop: 12 },
+  input: { backgroundColor: '#F1F5F9', borderRadius: 12, padding: 14, fontSize: 15, color: '#1B2036', borderWidth: 1, borderColor: '#F0F0F2' },
   modalInput: { backgroundColor: '#F5F5F7', borderRadius: 12, padding: 14, fontSize: 15, color: '#1B2036', borderWidth: 1, borderColor: '#E8E8E8' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#F5F5F7', borderWidth: 1, borderColor: '#E8E8E8' },
@@ -378,4 +412,29 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#4A5BCC' },
   submitBtn: { backgroundColor: '#1B2036', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 20, marginBottom: 20 },
   submitBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+
+  closeBtn: { padding: 4 },
+  modalForm: { maxHeight: '70%' },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  typeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#F0F0F2',
+  },
+  typeChipText: { fontSize: 13, fontWeight: '600', color: '#1B2036' },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  statusChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#F0F0F2',
+  },
+  statusChipText: { fontSize: 12, fontWeight: '600', color: '#1B2036' },
+  saveBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 16, marginBottom: 8 },
+  saveBtnText: { fontSize: 16, fontWeight: '700' },
 });

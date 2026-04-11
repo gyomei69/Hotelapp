@@ -47,11 +47,13 @@ const AuthButton = ({
 
 const styles = StyleSheet.create({
   base: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   primary: {
     backgroundColor: '#1B2036',

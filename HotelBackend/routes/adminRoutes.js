@@ -3,26 +3,41 @@ import {
   getAllBookings,
   getBookingById,
   updateBookingStatus,
+  confirmBookingPayment,
   deleteBooking,
+  patchBookingCheckIn,
+  patchBookingCheckOut,
+  cancelBookingByAdmin,
 } from '../controllers/bookingController.js';
-import { protect, admin } from '../middleware/authMiddleware.js';
+import { getRevenueReport } from '../controllers/revenueReportController.js';
+import { listHousekeeping, updateHousekeepingTask } from '../controllers/housekeepingController.js';
+import { listFeedbackAdmin, respondFeedback } from '../controllers/feedbackController.js';
+import { getOccupancyCalendar, listPaymentsReport } from '../controllers/adminOpsController.js';
+import { protect, requireAdmin, requireStaffAccess } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// All admin routes require authentication + admin role
-router.use(protect, admin);
+router.use(protect);
 
-// GET  /api/admin/bookings       → list all bookings (supports ?status=Pending filter)
-// POST is not here — users create bookings via /api/bookings
-router.route('/bookings')
-  .get(getAllBookings);
+// ── Super admin only ───────────────────────────────────────────────
+router.get('/revenue-report', requireAdmin, getRevenueReport);
+router.get('/feedback', requireAdmin, listFeedbackAdmin);
+router.patch('/feedback/:id/respond', requireAdmin, respondFeedback);
 
-// GET    /api/admin/bookings/:id  → booking details (user + room info)
-// PATCH  /api/admin/bookings/:id  → approve or reject
-// DELETE /api/admin/bookings/:id  → delete booking
-router.route('/bookings/:id')
-  .get(getBookingById)
-  .patch(updateBookingStatus)
-  .delete(deleteBooking);
+router.patch('/bookings/:id', requireAdmin, updateBookingStatus);
+router.patch('/bookings/:id/cancel-admin', requireAdmin, cancelBookingByAdmin);
+router.delete('/bookings/:id', requireAdmin, deleteBooking);
+
+// ── Staff + super admin ────────────────────────────────────────────
+router.get('/calendar', requireStaffAccess, getOccupancyCalendar);
+router.get('/payments', requireStaffAccess, listPaymentsReport);
+router.get('/housekeeping', requireStaffAccess, listHousekeeping);
+router.patch('/housekeeping/:id', requireStaffAccess, updateHousekeepingTask);
+
+router.get('/bookings', requireStaffAccess, getAllBookings);
+router.get('/bookings/:id', requireStaffAccess, getBookingById);
+router.patch('/bookings/:id/confirm-payment', requireStaffAccess, confirmBookingPayment);
+router.patch('/bookings/:id/check-in', requireStaffAccess, patchBookingCheckIn);
+router.patch('/bookings/:id/check-out', requireStaffAccess, patchBookingCheckOut);
 
 export default router;

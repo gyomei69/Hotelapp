@@ -1,13 +1,31 @@
 import React from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, SafeAreaView, Platform,
-  TouchableOpacity,
+  StyleSheet, Text, View, ScrollView, Platform,
+  TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { showActionError } from '../utils/errorHandling';
+import { changePassword as changePasswordApi } from '../services/api';
+import NotificationBell from '../components/NotificationBell';
 
-export default function ProfileScreen({ onGoBack }) {
-  const { user, logout } = useAuth();
+export default function ProfileScreen({ onGoBack, setActiveTab }) {
+  const { user, logout, updateProfile } = useAuth();
+  const [modalVisible, setModalVisible] = React.useState(false);
+  const [passwordModalVisible, setPasswordModalVisible] = React.useState(false);
+  const [name, setName] = React.useState(user?.name || '');
+  const [phone, setPhone] = React.useState(user?.phone || '');
+  const [saving, setSaving] = React.useState(false);
+  const [currentPassword, setCurrentPassword] = React.useState('');
+  const [newPassword, setNewPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [passwordSaving, setPasswordSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setName(user?.name || '');
+    setPhone(user?.phone || '');
+  }, [user]);
 
   const initials = (user?.name || 'U')
     .split(' ')
@@ -15,6 +33,50 @@ export default function ProfileScreen({ onGoBack }) {
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      showActionError('Validation Error', 'Name is required', 'Please enter your name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateProfile({ name: name.trim(), phone: phone.trim() });
+      setModalVisible(false);
+    } catch (error) {
+      showActionError('Update Failed', error, 'Unable to update profile.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword) {
+      showActionError('Validation', 'Current password is required', 'Enter your current password.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      showActionError('Validation', 'Invalid new password', 'New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showActionError('Validation', 'Mismatch', 'New password and confirmation do not match.');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await changePasswordApi(currentPassword, newPassword, confirmPassword);
+      setPasswordModalVisible(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      Alert.alert('Success', 'Your password has been updated.');
+    } catch (error) {
+      showActionError('Update Failed', error, error.message || 'Unable to change password.');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -24,8 +86,16 @@ export default function ProfileScreen({ onGoBack }) {
           <TouchableOpacity onPress={onGoBack} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Profile</Text>
-          <View style={{ width: 24 }} />
+          <Text style={[styles.headerTitle, styles.headerTitleCenter]}>Profile</Text>
+          <View style={styles.headerBellWrap}>
+            <NotificationBell
+              iconColor="#FFFFFF"
+              onBookingNotificationPress={() => {
+                onGoBack?.();
+                setActiveTab?.('guests');
+              }}
+            />
+          </View>
         </View>
 
         {/* Avatar Section */}
@@ -36,7 +106,7 @@ export default function ProfileScreen({ onGoBack }) {
           <View style={styles.avatarInfo}>
             <Text style={styles.userName}>{user?.name || 'User'}</Text>
             <Text style={styles.userRole}>
-              {user?.role === 'admin' ? 'Hotel Manager' : user?.role === 'staff' ? 'Staff' : 'Guest'}
+              {user?.role === 'admin' ? 'Super Admin' : user?.role === 'staff' ? 'Staff' : 'Guest'}
             </Text>
           </View>
         </View>
@@ -52,7 +122,7 @@ export default function ProfileScreen({ onGoBack }) {
             <InfoRow icon="location-outline" label="Location" value="Malaybalay City" />
           </View>
 
-          <TouchableOpacity style={styles.editBtn} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.editBtn} activeOpacity={0.8} onPress={() => setModalVisible(true)}>
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
@@ -61,9 +131,11 @@ export default function ProfileScreen({ onGoBack }) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Settings</Text>
           <View style={styles.settingsCard}>
-            <SettingsRow icon="lock-closed-outline" label="Change Password" />
-            <View style={styles.divider} />
-            <SettingsRow icon="person-outline" label="Account Settings" />
+            <SettingsRow
+              icon="lock-closed-outline"
+              label="Change Password"
+              onPress={() => setPasswordModalVisible(true)}
+            />
           </View>
         </View>
 
@@ -74,6 +146,81 @@ export default function ProfileScreen({ onGoBack }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#1B2036" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Name</Text>
+            <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Your name" />
+            <Text style={styles.inputLabel}>Phone</Text>
+            <TextInput value={phone} onChangeText={setPhone} style={styles.input} placeholder="Your phone" keyboardType="phone-pad" />
+            <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.7 }]} onPress={handleSave} disabled={saving}>
+              {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={passwordModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Change Password</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setPasswordModalVisible(false);
+                  setCurrentPassword('');
+                  setNewPassword('');
+                  setConfirmPassword('');
+                }}
+              >
+                <Ionicons name="close" size={22} color="#1B2036" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Current Password</Text>
+            <TextInput
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              style={styles.input}
+              placeholder="Current password"
+              secureTextEntry
+            />
+            <Text style={styles.inputLabel}>New Password</Text>
+            <TextInput
+              value={newPassword}
+              onChangeText={setNewPassword}
+              style={styles.input}
+              placeholder="At least 8 characters"
+              secureTextEntry
+            />
+            <Text style={styles.inputLabel}>Confirm New Password</Text>
+            <TextInput
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              style={styles.input}
+              placeholder="Confirm new password"
+              secureTextEntry
+            />
+            <TouchableOpacity
+              style={[styles.saveBtn, passwordSaving && { opacity: 0.7 }]}
+              onPress={handleChangePassword}
+              disabled={passwordSaving}
+            >
+              {passwordSaving ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveBtnText}>Update Password</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -90,9 +237,9 @@ function InfoRow({ icon, label, value }) {
   );
 }
 
-function SettingsRow({ icon, label }) {
+function SettingsRow({ icon, label, onPress }) {
   return (
-    <TouchableOpacity style={styles.settingsRow} activeOpacity={0.6}>
+    <TouchableOpacity style={styles.settingsRow} activeOpacity={0.6} onPress={onPress}>
       <Ionicons name={icon} size={20} color="#1B2036" style={styles.settingsIcon} />
       <Text style={styles.settingsLabel}>{label}</Text>
       <Ionicons name="chevron-forward" size={18} color="#8E8E93" />
@@ -117,6 +264,15 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  headerTitleCenter: {
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerBellWrap: {
+    width: 40,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
 
   avatarSection: {
@@ -248,6 +404,56 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     color: '#EF4444',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1B2036',
+  },
+  inputLabel: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#F5F5F7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#1B2036',
+  },
+  saveBtn: {
+    marginTop: 18,
+    backgroundColor: '#1B2036',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 13,
+  },
+  saveBtnText: {
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
   },

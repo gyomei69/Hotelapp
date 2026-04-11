@@ -1,20 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, SafeAreaView, Platform,
-  TouchableOpacity, ActivityIndicator, Dimensions, Image, TextInput,
+  StyleSheet, Text, View, ScrollView, Platform,
+  TouchableOpacity, ActivityIndicator, Dimensions, Image, Alert, Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../context/AuthContext';
-import { getStats, getRooms } from '../services/api';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { getStats, getRooms, getRevenueReport } from '../services/api';
+import { getRoomImageSource } from '../utils/roomImages';
+import { buildRevenueReportHtml } from '../utils/revenueReportPdfHtml';
+import { showActionError } from '../utils/errorHandling';
+import NotificationBell from '../components/NotificationBell';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-export default function DashboardScreen({ setActiveTab, onNavigate }) {
-  const { user } = useAuth();
+export default function DashboardScreen({ setActiveTab, onNavigate, isSuperAdmin = false }) {
   const [stats, setStats] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -26,9 +32,73 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
       setRooms(roomsData.filter(r => r.status === 'Available').slice(0, 3));
     } catch (e) {
       console.error('Failed to load dashboard:', e);
+      showActionError('Dashboard Error', e, 'Unable to load dashboard data right now.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const exportRevenuePdf = async (period) => {
+    setExportModalVisible(false);
+    try {
+      setExporting(true);
+      let data;
+      try {
+        data = await getRevenueReport(period);
+      } catch (apiErr) {
+        showActionError(
+          'Could not load revenue',
+          apiErr,
+          'Check that the backend is running, your Wi‑Fi IP in api.js matches this PC, and restart the server after updates.'
+        );
+        return;
+      }
+      const html = buildRevenueReportHtml(data);
+      let uri;
+      try {
+        const result = await Print.printToFileAsync({ html });
+        uri = result.uri;
+      } catch (printErr) {
+        showActionError('Could not create PDF', printErr, 'PDF generation failed on this device.');
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          try {
+            await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+          } catch {
+            Alert.alert('Report ready', 'PDF was generated. Use print or save from the browser if prompted.');
+          }
+        } else {
+          Alert.alert('Report ready', 'PDF was generated. Check your downloads or print dialog.');
+        }
+        return;
+      }
+
+      try {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          UTI: 'com.adobe.pdf',
+          dialogTitle: 'Export Revenue Report',
+        });
+      } catch (shareErr) {
+        console.warn('[export] share failed', shareErr);
+        Alert.alert(
+          'Report created',
+          'The PDF was saved but sharing could not open. You can find it in your app cache or try again.',
+        );
+      }
+    } catch (e) {
+      showActionError('Export failed', e, 'Could not share the report. Try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const promptExportPeriod = () => {
+    setExportModalVisible(true);
   };
 
   if (loading && !stats) {
@@ -61,9 +131,9 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
             <Text style={[styles.locationText, { color: '#1B2036' }]}>Malay Balay City, Bukidnon</Text>
           </View>
           <View style={styles.topRight}>
-            <TouchableOpacity style={styles.iconBtn}>
-              <Ionicons name="notifications-outline" size={22} color="#1B2036" />
-            </TouchableOpacity>
+            <NotificationBell
+              onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+            />
             <TouchableOpacity style={styles.profileBtn} onPress={() => onNavigate && onNavigate('profile')}>
               <Ionicons name="person" size={18} color="#FFFFFF" />
             </TouchableOpacity>
@@ -71,22 +141,12 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
         </View>
 
         {/* ─── Title ─── */}
-        <Text style={[styles.title, { color: '#1B2036' }]}>Discover{'\n'}Francis Hotel</Text>
-
-        {/* ─── Search Bar ─── */}
-        <View style={[styles.searchContainer, { backgroundColor: '#FFFFFF', borderColor: '#F0F0F0' }]}>
-          <Ionicons name="search-outline" size={20} color="#8E8E93" style={styles.searchIcon} />
-          <TextInput
-            style={[styles.searchInput, { color: '#1B2036' }]}
-            placeholder="Search rooms, guests..."
-            placeholderTextColor="#8E8E93"
-            value={search}
-            onChangeText={setSearch}
-          />
-          <TouchableOpacity style={styles.filterBtn}>
-            <Ionicons name="options-outline" size={20} color="#1B2036" />
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.dashboardRoleLabel}>
+          {isSuperAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
+        </Text>
+        <Text style={[styles.title, { color: '#1B2036', textAlign: 'center', alignSelf: 'stretch' }]}>
+          Discover{'\n'}Aurora Grand Hotel
+        </Text>
 
         {/* ─── Stat Cards ─── */}
         <View style={styles.statsGrid}>
@@ -106,18 +166,29 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
         {/* ─── Quick Actions ─── */}
         <Text style={[styles.sectionTitle, { color: '#1B2036' }]}>Quick Actions</Text>
         <View style={styles.actionsRow}>
+          {isSuperAdmin ? (
+            <TouchableOpacity
+              style={[styles.actionCard, exporting && { opacity: 0.7 }]}
+              onPress={promptExportPeriod}
+              disabled={exporting}
+              activeOpacity={0.7}
+            >
+              <View style={styles.actionIconBox}>
+                {exporting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="document-text-outline" size={24} color="#FFFFFF" />
+                )}
+              </View>
+              <Text style={styles.actionLabelWhite}>Export Revenue</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => setActiveTab && setActiveTab('rooms')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.actionIconBox}>
-              <Ionicons name="add-outline" size={24} color="#FFFFFF" />
-            </View>
-            <Text style={styles.actionLabelWhite}>New Booking</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0F0F0' }]}
+            style={[
+              styles.actionCard,
+              { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0F0F0' },
+              !isSuperAdmin && { flex: 1, maxWidth: '100%' },
+            ]}
             onPress={() => onNavigate && onNavigate('bookingHistory')}
             activeOpacity={0.7}
           >
@@ -137,8 +208,9 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
         {rooms.map((room) => (
           <View key={room._id} style={[styles.roomCard, { backgroundColor: '#FFFFFF' }]}>
             <Image
-              source={{ uri: room.imageUrl || 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=600&q=80' }}
+              source={getRoomImageSource(room)}
               style={styles.roomImage}
+              resizeMode="cover"
             />
             <View style={styles.roomInfo}>
               <View style={styles.roomTitleRow}>
@@ -155,7 +227,7 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
                 </View>
               </View>
               <View style={styles.roomBottom}>
-                <Text style={[styles.roomPrice, { color: '#1B2036' }]}>${room.price} <Text style={[styles.perNight, { color: '#8E8E93' }]}>/night</Text></Text>
+                <Text style={[styles.roomPrice, { color: '#1B2036' }]}>₱{room.price} <Text style={[styles.perNight, { color: '#8E8E93' }]}>/night</Text></Text>
                 <View style={[styles.availBadge, { backgroundColor: '#E8FFF0' }]}>
                   <Text style={styles.availText}>Available</Text>
                 </View>
@@ -171,6 +243,35 @@ export default function DashboardScreen({ setActiveTab, onNavigate }) {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={exportModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExportModalVisible(false)}
+      >
+        <View style={styles.exportModalOverlay}>
+          <View style={styles.exportModalCard}>
+            <Text style={styles.exportModalTitle}>Export Revenue Report</Text>
+            <Text style={styles.exportModalSubtitle}>Choose period</Text>
+            {['daily', 'monthly', 'yearly'].map((period) => (
+              <TouchableOpacity
+                key={period}
+                style={styles.exportModalBtn}
+                onPress={() => exportRevenuePdf(period)}
+                disabled={exporting}
+              >
+                <Text style={styles.exportModalBtnText}>
+                  {period.charAt(0).toUpperCase() + period.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.exportModalCancel} onPress={() => setExportModalVisible(false)}>
+              <Text style={styles.exportModalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -185,13 +286,17 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontSize: 13, fontWeight: '500' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  iconBtn: { padding: 4 },
   profileBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#4A5BCC', justifyContent: 'center', alignItems: 'center' },
+  dashboardRoleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4A5BCC',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
   title: { fontSize: 26, fontWeight: '700', lineHeight: 34, marginBottom: 20 },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', borderRadius: 28, paddingHorizontal: 16, height: 50, borderWidth: 1, marginBottom: 24 },
-  searchIcon: { marginRight: 10 },
-  searchInput: { flex: 1, fontSize: 14 },
-  filterBtn: { padding: 6 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 28 },
   statCard: { width: cardW, flexDirection: 'row', alignItems: 'center', borderRadius: 16, padding: 16, gap: 14, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   statIcon: { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
@@ -221,4 +326,31 @@ const styles = StyleSheet.create({
   availText: { fontSize: 11, color: '#34C759', fontWeight: '600' },
   emptyBox: { alignItems: 'center', paddingVertical: 40 },
   emptyText: { marginTop: 8, fontSize: 14 },
+
+  exportModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  exportModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+  },
+  exportModalTitle: { fontSize: 18, fontWeight: '700', color: '#1B2036', marginBottom: 4 },
+  exportModalSubtitle: { fontSize: 13, color: '#8E8E93', marginBottom: 16 },
+  exportModalBtn: {
+    backgroundColor: '#1B2036',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  exportModalBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  exportModalCancel: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  exportModalCancelText: { fontSize: 15, fontWeight: '600', color: '#8E8E93' },
 });

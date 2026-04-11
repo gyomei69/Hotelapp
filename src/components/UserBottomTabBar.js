@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function UserBottomTabBar({ activeTab, setActiveTab }) {
+  const insets = useSafeAreaInsets();
   const tabs = [
     { id: 'explore', icon: 'home', label: 'Explore' },
     { id: 'mybookings', icon: 'calendar', label: 'Bookings' },
@@ -10,7 +12,16 @@ export default function UserBottomTabBar({ activeTab, setActiveTab }) {
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: '#FFFFFF', borderTopColor: '#F0F0F0' }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#F0F0F0',
+          paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 14 : 10),
+        },
+      ]}
+    >
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id;
         return (
@@ -40,7 +51,6 @@ export default function UserBottomTabBar({ activeTab, setActiveTab }) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
     paddingTop: 12,
     borderTopWidth: 1,
     shadowColor: '#000',

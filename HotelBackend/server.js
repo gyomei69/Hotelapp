@@ -12,6 +12,9 @@ import guestRoutes from './routes/guestRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import statsRoutes from './routes/statsRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import feedbackRoutes from './routes/feedbackRoutes.js';
+import recaptchaRoutes from './routes/recaptchaRoutes.js';
 import { apiLimiter } from './middleware/rateLimitMiddleware.js';
 
 dotenv.config();
@@ -19,28 +22,38 @@ dotenv.config();
 const app = express();
 
 // ── Security Middleware ──────────────────────────────────────────────
-app.use(helmet());           // HTTP security headers
+// CSP disabled so HTML card-checkout pages can use inline styles in the browser.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '1mb' })); // Limit payload size
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt';
+const HOST = process.env.HOST || '0.0.0.0';
+
+// Lightweight health check (before rate limit) — for LAN / Expo debugging
+app.get('/api/health', (req, res) => {
+  const dbOk = mongoose.connection.readyState === 1;
+  res.status(dbOk ? 200 : 503).json({
+    ok: true,
+    mongo: dbOk ? 'connected' : 'disconnected',
+  });
+});
 
 // Global API rate limiter (100 req / 15min per IP)
 app.use('/api', apiLimiter);
 
-// Database Connection
-const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt';
-
-mongoose.connect(MONGO_URI, {
-  family: 4 // Force IPv4 to prevent mongoose from trying IPv6 first and failing
-})
+mongoose
+  .connect(MONGO_URI, {
+    family: 4, // Force IPv4 to prevent mongoose from trying IPv6 first and failing
+  })
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err.message);
+    console.error('⚠️  Start MongoDB or set MONGO_URI — API routes need the database.');
   });
 
 app.get('/', (req, res) => {
@@ -48,10 +61,32 @@ app.get('/', (req, res) => {
 });
 
 // Setup Routes
+app.use('/api', recaptchaRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/guests', guestRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/feedback', feedbackRoutes);
+console.log('[routes] GET/PUT /api/notifications registered');
+
 app.use('/api/admin', adminRoutes);
+
+const httpServer = app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server listening on http://${HOST}:${PORT} (open http://YOUR_PC_IP:${PORT}/api/health from your phone’s network)`);
+});
+
+httpServer.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ Port ${PORT} is already in use — another process (often a previous \`node server.js\`) is still bound to it.`);
+    console.error('   Stop that terminal or free the port, then start again.');
+    console.error('   Use another port:  PowerShell:  $env:PORT=5001; npm run start');
+    console.error('   See what owns the port:  netstat -ano | findstr :' + PORT);
+    console.error('   End the process:         taskkill /PID <pid> /F\n');
+    process.exit(1);
+  }
+  console.error(err);
+  process.exit(1);
+});

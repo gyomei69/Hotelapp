@@ -1,13 +1,13 @@
 import express from 'express';
-import { getUsers, deleteUser } from '../controllers/userController.js';
-import { protect, admin } from '../middleware/authMiddleware.js';
+import { getUsers, deleteUser, updateUserRole } from '../controllers/userController.js';
+import { protect, requireAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.route('/')
-  .get(protect, admin, getUsers);
+router.route('/').get(protect, requireAdmin, getUsers);
 
-router.route('/:id')
-  .delete(protect, admin, deleteUser);
+router.patch('/:id/role', protect, requireAdmin, updateUserRole);
+
+router.route('/:id').delete(protect, requireAdmin, deleteUser);
 
 export default router;

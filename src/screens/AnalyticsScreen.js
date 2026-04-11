@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, SafeAreaView, Platform,
+  StyleSheet, Text, View, ScrollView, Platform,
   TouchableOpacity, ActivityIndicator, Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
-import { getStats, getBookings } from '../services/api';
+import { getStats } from '../services/api';
+import { showActionError } from '../utils/errorHandling';
+import NotificationBell from '../components/NotificationBell';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-export default function AnalyticsScreen() {
+export default function AnalyticsScreen({ setActiveTab }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,6 +27,7 @@ export default function AnalyticsScreen() {
       setStats(data);
     } catch (e) {
       console.error('Failed to load analytics:', e);
+      showActionError('Analytics Error', e, 'Unable to load analytics data right now.');
     } finally {
       setLoading(false);
     }
@@ -48,7 +52,7 @@ export default function AnalyticsScreen() {
   };
 
   const metrics = [
-    { id: '1', title: 'Revenue', value: `$${totalRevenue.toLocaleString()}`, icon: 'cash-outline', color: '#34C759', bg: '#E8FFF0', trend: '+12%', isUp: true },
+    { id: '1', title: 'Revenue', value: `₱${totalRevenue.toLocaleString()}`, icon: 'cash-outline', color: '#34C759', bg: '#E8FFF0', trend: '+12%', isUp: true },
     { id: '2', title: 'New Bookings', value: newBookings, icon: 'calendar-outline', color: '#4A5BCC', bg: '#EEF0FF', trend: '+5%', isUp: true },
     { id: '3', title: 'Occupancy', value: `${occRate}%`, icon: 'bed-outline', color: '#FF9500', bg: '#FFF5E5', trend: '-2%', isUp: false },
     { id: '4', title: 'Avg. Stay', value: '3.2 N', icon: 'time-outline', color: '#AF52DE', bg: '#F8E8FF', trend: '+1%', isUp: true },
@@ -57,8 +61,15 @@ export default function AnalyticsScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: '#F5F5F7' }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.title, { color: '#1B2036' }]}>Analytics overview</Text>
-        <Text style={styles.subtitle}>Performance metrics for your property.</Text>
+        <View style={styles.titleRow}>
+          <View style={styles.titleBlock}>
+            <Text style={[styles.title, { color: '#1B2036' }]}>Analytics overview</Text>
+            <Text style={styles.subtitle}>Performance metrics for your property.</Text>
+          </View>
+          <NotificationBell
+            onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+          />
+        </View>
 
         {/* Metrics Grid */}
         <View style={styles.grid}>
@@ -113,6 +124,14 @@ export default function AnalyticsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F5F5F7' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  titleBlock: { flex: 1, minWidth: 0 },
   scroll: {
     padding: 24,
     paddingTop: Platform.OS === 'android' ? 48 : 16,

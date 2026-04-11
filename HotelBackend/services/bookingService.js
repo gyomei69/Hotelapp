@@ -39,15 +39,42 @@ export const validateBookingInput = ({ room, checkInDate, checkOutDate, guestCou
     return { valid: false, message: 'Check-in date cannot be in the past' };
   }
 
-  if (guestCount !== undefined && (typeof guestCount !== 'number' || guestCount < 1)) {
+  const gc = Number(guestCount);
+  if (
+    guestCount !== undefined &&
+    guestCount !== null &&
+    (Number.isNaN(gc) || gc < 1)
+  ) {
     return { valid: false, message: 'Guest count must be at least 1' };
   }
 
-  if (paymentMethod && !VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+  if (
+    paymentMethod != null &&
+    paymentMethod !== '' &&
+    !VALID_PAYMENT_METHODS.includes(paymentMethod)
+  ) {
     return { valid: false, message: `Payment method must be one of: ${VALID_PAYMENT_METHODS.join(', ')}` };
   }
 
   return { valid: true };
+};
+
+/**
+ * Ensure guest count does not exceed room capacity.
+ */
+export const assertGuestCapacity = (roomDoc, guestCount) => {
+  if (!roomDoc) {
+    return { ok: false, message: 'Room not found' };
+  }
+  const cap =
+    typeof roomDoc.capacity === 'number' && roomDoc.capacity > 0 ? roomDoc.capacity : 4;
+  if (guestCount > cap) {
+    return {
+      ok: false,
+      message: `Number of guests cannot exceed room capacity (${cap})`,
+    };
+  }
+  return { ok: true };
 };
 
 // ── Availability Check ──────────────────────────────────────────────
@@ -63,7 +90,7 @@ export const checkRoomAvailability = async (roomId, checkInDate, checkOutDate, e
 
   const filter = {
     room: roomId,
-    status: { $in: ['Pending', 'Approved'] },
+    status: { $in: ['Pending', 'Approved', 'Confirmed', 'Completed'] },
     // Standard overlap detection: two ranges overlap if one starts before the other ends AND ends after the other starts
     checkInDate: { $lt: checkOut },
     checkOutDate: { $gt: checkIn },

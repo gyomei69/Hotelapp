@@ -17,7 +17,10 @@ export const getRooms = async (req, res) => {
 // @access  Private/Admin
 export const createRoom = async (req, res) => {
   try {
-    const room = new Room(req.body);
+    const payload = { ...req.body };
+    if (payload.price !== undefined) payload.price = Number(payload.price);
+    if (payload.capacity !== undefined) payload.capacity = Number(payload.capacity);
+    const room = new Room(payload);
     const createdRoom = await room.save();
     res.status(201).json(createdRoom);
   } catch (error) {
@@ -35,7 +38,11 @@ export const updateRoom = async (req, res) => {
     if (room) {
       room.roomNumber = req.body.roomNumber || room.roomNumber;
       room.type = req.body.type || room.type;
-      room.price = req.body.price || room.price;
+      room.price = req.body.price != null ? Number(req.body.price) : room.price;
+      room.capacity =
+        req.body.capacity != null ? Number(req.body.capacity) : room.capacity;
+      room.description =
+        req.body.description !== undefined ? req.body.description : room.description;
       room.status = req.body.status || room.status;
       room.features = req.body.features || room.features;
       room.imageUrl = req.body.imageUrl || room.imageUrl;

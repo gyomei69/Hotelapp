@@ -36,9 +36,25 @@ const bookingSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      required: true,
       enum: ['Cash', 'Card', 'Online'],
       default: 'Cash',
+    },
+    /** Tracks payment lifecycle — revenue counts only when Paid */
+    paymentStatus: {
+      type: String,
+      enum: [
+        'Unpaid',
+        'Awaiting Admin',
+        'Awaiting Payment',
+        'Pending Payment at Hotel',
+        'Paid',
+        'Failed',
+      ],
+      default: 'Unpaid',
+    },
+    paidAt: {
+      type: Date,
+      default: null,
     },
     specialRequests: {
       type: String,
@@ -47,17 +63,33 @@ const bookingSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ['Pending', 'Approved', 'Rejected'],
+      enum: ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Confirmed', 'Completed'],
       default: 'Pending',
+    },
+    checkInStatus: {
+      type: String,
+      enum: ['pending', 'checked_in'],
+      default: 'pending',
+    },
+    checkOutStatus: {
+      type: String,
+      enum: ['pending', 'checked_out'],
+      default: 'pending',
+    },
+    checkInAt: {
+      type: Date,
+      default: null,
+    },
+    checkOutAt: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }
 );
 
-// Compound index to speed up overlap queries for double-booking prevention
 bookingSchema.index({ room: 1, checkInDate: 1, checkOutDate: 1 });
 
-// Virtual alias so `notes` maps to `specialRequests`
 bookingSchema.virtual('notes').get(function () {
   return this.specialRequests;
 });

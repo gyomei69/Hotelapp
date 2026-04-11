@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity, SafeAreaView,
+  StyleSheet, Text, View, TouchableOpacity,
   KeyboardAvoidingView, ScrollView, Platform, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AuthInput from '../components/AuthInput';
 import AuthButton from '../components/AuthButton';
