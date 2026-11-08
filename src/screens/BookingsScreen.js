@@ -1,76 +1,236 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, Platform,
+  StyleSheet, Text, View, ScrollView, Platform, FlatList,
   TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  getBookings,
+  getBookingsPaginated,
   deleteBooking,
-  updateBookingStatus,
+  putBookingApprove,
+  putBookingReject,
   confirmBookingPayment,
   patchBookingCheckIn,
   patchBookingCheckOut,
+  putBookingComplete,
   cancelBookingAdmin,
 } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { showActionError } from '../utils/errorHandling';
 import NotificationBell from '../components/NotificationBell';
+import { handleStaffNotificationNavigate } from '../utils/notificationNavigation';
+import { formatBookingDateTime } from '../utils/formatBookingDateTime';
+import { useIsMountedRef } from '../utils/useIsMountedRef';
 
-const TABS = ['All', 'Pending', 'Approved', 'Confirmed', 'Completed', 'Rejected', 'Cancelled'];
+const TABS = [
+  'Pending',
+  'Approved',
+  'Confirmed',
+  'Checked-In',
+  'Checked-Out',
+  'Completed',
+  'Rejected',
+  'Cancelled',
+];
 
 /** Bottom tab bar ~56px + spacing; keeps last cards scrollable above tabs */
 const BOTTOM_TAB_CLEARANCE = 72;
 
+function startOfDayTs(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
+/** Guest chose cash (or legacy) — staff must confirm before Paid. */
+function canStaffConfirmPayment(b) {
+  return (
+    b.booking_status === 'Approved' &&
+    ['Pending', 'Pending Payment at Hotel'].includes(b.paymentStatus || '')
+  );
+}
+
+function canStaffCheckIn(b) {
+  const paid = b.paymentStatus === 'Paid';
+  // Allow check-in from Confirmed, or Approved if already marked Paid (legacy/edge).
+  if (b.booking_status === 'Confirmed') return true;
+  if (b.booking_status === 'Approved' && paid) return true;
+  return false;
+}
+
+function canStaffManualCheckOut(b) {
+  return b.booking_status === 'Checked-In';
+}
+
+function canStaffAutoCheckOutDue(b) {
+  if (!canStaffManualCheckOut(b)) return false;
+  const today = startOfDayTs(new Date());
+  return today >= startOfDayTs(b.checkOutDate);
+}
+
+function canStaffMarkCompleted(b) {
+  return b.booking_status === 'Checked-Out';
+}
+
+function userCanOperateBookings(user) {
+  const r = String(user?.role ?? '').trim().toLowerCase();
+  return r === 'admin' || r === 'staff';
+}
+
 export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
+  const { user } = useAuth();
+  const canOperateBookings = userCanOperateBookings(user);
   const insets = useSafeAreaInsets();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState('All');
+  const [actionBusyId, setActionBusyId] = useState(null);
+  const [activeFilter, setActiveFilter] = useState('Pending');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const scrollBottomPad = BOTTOM_TAB_CLEARANCE + Math.max(insets.bottom, 8);
+  const autoCheckoutInFlightRef = useRef(false);
+  const loadAbortRef = useRef(null);
+  const mountedRef = useIsMountedRef();
 
-  useEffect(() => { loadData(); }, []);
+  const loadData = useCallback(async () => {
+    // Cancel any previous in-flight list load to prevent overlap + setState after unmount.
+    try {
+      loadAbortRef.current?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
 
-  const loadData = async () => {
     try {
       setLoading(true);
-      const data = await getBookings();
-      setBookings(data);
+      const status = activeFilter;
+      const resp = await getBookingsPaginated({ page, limit: 10, status, signal: controller.signal });
+      const rows = Array.isArray(resp?.data) ? resp.data : Array.isArray(resp) ? resp : [];
+      // Hard clamp to 10 for UX safety even if backend misbehaves.
+      const normalized = rows.map((b) => ({
+        ...b,
+        booking_status: b.booking_status || b.status || 'Pending',
+      }));
+      if (!mountedRef.current || controller.signal.aborted) return;
+      setBookings(normalized.slice(0, 10));
+      setTotalPages(Number(resp?.totalPages) || 1);
+
+      // Auto check-out: if stay is checked-in and checkout date is reached,
+      // automatically trigger check-out so it moves to the Checked-Out tab.
+      if (canOperateBookings && !autoCheckoutInFlightRef.current && Array.isArray(rows)) {
+        const dueForAutoCheckout = rows.filter((b) => canStaffAutoCheckOutDue(b));
+        if (dueForAutoCheckout.length) {
+          autoCheckoutInFlightRef.current = true;
+          try {
+            // Sequential to avoid spamming the backend.
+            // Each call records activity + sends the guest notification.
+            for (const b of dueForAutoCheckout) {
+              // eslint-disable-next-line no-await-in-loop
+              await patchBookingCheckOut(b._id);
+            }
+            if (mountedRef.current && activeFilter === 'Checked-In') {
+              setActiveFilter('Checked-Out');
+            }
+            const refreshed = await getBookingsPaginated({ page, limit: 10, status, signal: controller.signal });
+            const refreshedRows = Array.isArray(refreshed?.data) ? refreshed.data : [];
+            const refreshedNormalized = refreshedRows.map((b) => ({
+              ...b,
+              booking_status: b.booking_status || b.status || 'Pending',
+            }));
+            if (!mountedRef.current || controller.signal.aborted) return;
+            setBookings(refreshedNormalized.slice(0, 10));
+            setTotalPages(Number(refreshed?.totalPages) || 1);
+          } catch (e) {
+            console.warn('[autoCheckout] failed', e?.message || e);
+          } finally {
+            autoCheckoutInFlightRef.current = false;
+          }
+        }
+      }
     } catch (e) {
+      if (String(e?.message || '').toLowerCase().includes('canceled')) {
+        return;
+      }
+      if (String(e?.message || '').toLowerCase().includes('aborted')) {
+        return;
+      }
       console.error('Failed to load bookings:', e);
       showActionError('Bookings Error', e, 'Unable to load bookings right now.');
     } finally {
-      setLoading(false);
+      if (mountedRef.current && !controller.signal.aborted) {
+        setLoading(false);
+      }
     }
-  };
+  }, [activeFilter, page, canOperateBookings, mountedRef]);
+
+  useEffect(() => {
+    loadData();
+    return () => {
+      try {
+        loadAbortRef.current?.abort?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [loadData]);
 
   const handleDelete = (id) => {
     Alert.alert('Delete Booking', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
+          if (actionBusyId) return;
+          setActionBusyId(id);
           await deleteBooking(id);
-          loadData();
+          await loadData();
         } catch (e) {
           showActionError('Delete Failed', e, 'Unable to delete booking right now.');
+        } finally {
+          setActionBusyId(null);
         }
       }},
     ]);
   };
 
-  const handleStatusUpdate = (id, newStatus) => {
-    const title = `${newStatus} booking`;
-    const message = `Are you sure you want to ${newStatus.toLowerCase()} this booking?`;
-    Alert.alert(title, message, [
+  const handleApprove = (id) => {
+    Alert.alert('Approve booking', 'Approve this reservation?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: newStatus,
+        text: 'Approve',
         onPress: async () => {
           try {
-            await updateBookingStatus(id, newStatus);
-            loadData();
+            if (actionBusyId) return;
+            setActionBusyId(id);
+            await putBookingApprove(id);
+            await loadData();
           } catch (e) {
-            showActionError('Update Failed', e, 'Unable to update booking status.');
+            showActionError('Update Failed', e, 'Unable to approve booking.');
+          } finally {
+            setActionBusyId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleReject = (id) => {
+    Alert.alert('Reject booking', 'Reject this reservation?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reject',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            if (actionBusyId) return;
+            setActionBusyId(id);
+            await putBookingReject(id);
+            await loadData();
+          } catch (e) {
+            showActionError('Update Failed', e, 'Unable to reject booking.');
+          } finally {
+            setActionBusyId(null);
           }
         },
       },
@@ -84,10 +244,18 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
         text: 'Check in',
         onPress: async () => {
           try {
-            await patchBookingCheckIn(id);
-            loadData();
+            if (actionBusyId) return;
+            setActionBusyId(id);
+            const updated = await patchBookingCheckIn(id);
+            const room = updated?.room;
+            const roomLabel = room ? `${room.type || 'Room'} (Rm ${room.roomNumber || '—'})` : 'the booked room';
+            setActiveFilter('Checked-In');
+            await loadData();
+            Alert.alert('Successful check-in', `Guest has been checked in to ${roomLabel}.`);
           } catch (e) {
             showActionError('Check-in', e, 'Could not record check-in.');
+          } finally {
+            setActionBusyId(null);
           }
         },
       },
@@ -101,10 +269,37 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
         text: 'Check out',
         onPress: async () => {
           try {
-            await patchBookingCheckOut(id);
-            loadData();
+            if (actionBusyId) return;
+            setActionBusyId(id);
+            await patchBookingCheckOut(id, {});
+            setActiveFilter('Checked-Out');
+            await loadData();
           } catch (e) {
             showActionError('Check-out', e, 'Could not record check-out.');
+          } finally {
+            setActionBusyId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleMarkCompleted = (id) => {
+    Alert.alert('Mark as completed', 'Mark this booking as completed?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Complete',
+        onPress: async () => {
+          try {
+            if (actionBusyId) return;
+            setActionBusyId(id);
+            await putBookingComplete(id);
+            setActiveFilter('Completed');
+            await loadData();
+          } catch (e) {
+            showActionError('Complete', e, 'Could not mark as completed.');
+          } finally {
+            setActionBusyId(null);
           }
         },
       },
@@ -119,10 +314,14 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
         style: 'destructive',
         onPress: async () => {
           try {
+            if (actionBusyId) return;
+            setActionBusyId(id);
             await cancelBookingAdmin(id);
-            loadData();
+            await loadData();
           } catch (e) {
             showActionError('Cancel', e, 'Could not cancel booking.');
+          } finally {
+            setActionBusyId(null);
           }
         },
       },
@@ -132,18 +331,22 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
   const handleConfirmPayment = (id) => {
     Alert.alert(
       'Confirm payment',
-      'Record that payment was received? This will mark the booking as paid and completed.',
+      'Record that payment was received? The booking stays active until the guest checks out.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Confirm',
           onPress: async () => {
             try {
+              if (actionBusyId) return;
+              setActionBusyId(id);
               await confirmBookingPayment(id);
-              loadData();
+              await loadData();
               Alert.alert('Success', 'Payment confirmed.');
             } catch (e) {
               showActionError('Confirm failed', e, 'Unable to confirm payment right now.');
+            } finally {
+              setActionBusyId(null);
             }
           },
         },
@@ -152,8 +355,8 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
   };
 
   const formatDate = (d) => {
-    if (!d) return 'N/A';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const s = formatBookingDateTime(d);
+    return s || 'N/A';
   };
 
   const getStatusColor = (s) => {
@@ -163,15 +366,14 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
       case 'Rejected': return { bg: '#FEF2F2', text: '#EF4444' };
       case 'Cancelled': return { bg: '#F1F5F9', text: '#64748B' };
       case 'Confirmed': return { bg: '#EEF2FF', text: '#4A5BCC' };
+      case 'Checked-In': return { bg: '#ECFEFF', text: '#0F766E' };
+      case 'Checked-Out': return { bg: '#F3E8FF', text: '#7C3AED' };
       case 'Completed': return { bg: '#E8FFF0', text: '#15803D' };
       default:         return { bg: '#F0F0F2', text: '#8E8E93' };
     }
   };
 
-  const filtered = bookings.filter(b => {
-    if (activeFilter === 'All') return true;
-    return b.status === activeFilter;
-  });
+  const filtered = bookings.filter((b) => b.booking_status === activeFilter);
 
   if (loading) {
     return (
@@ -189,7 +391,9 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
           <Text style={styles.subtitle}>{bookings.length} total reservations</Text>
         </View>
         <NotificationBell
-          onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+          onNotificationNavigate={(item) =>
+            handleStaffNotificationNavigate(setActiveTab, isSuperAdmin, item)
+          }
         />
       </View>
 
@@ -210,7 +414,10 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
                 index < TABS.length - 1 && styles.tabBtnSpacing,
                 activeFilter === tab && styles.tabBtnActive,
               ]}
-              onPress={() => setActiveFilter(tab)}
+              onPress={() => {
+                setActiveFilter(tab);
+                setPage(1);
+              }}
               activeOpacity={0.7}
             >
               <Text
@@ -227,17 +434,23 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
         </ScrollView>
       </View>
 
-      <ScrollView
-        style={styles.listScroll}
+      <FlatList
+        data={filtered}
+        keyExtractor={(b) => String(b._id)}
         contentContainerStyle={[styles.scroll, { paddingBottom: scrollBottomPad }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-      >
-        {filtered.map(b => {
-          const colors = getStatusColor(b.status);
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+        renderItem={({ item: b }) => {
+          const colors = getStatusColor(b.booking_status);
           const guestName = b.user?.name || 'Unknown Guest';
           const guestEmail = b.user?.email || 'No email';
           const roomName = b.room ? `${b.room.type} (Rm ${b.room.roomNumber})` : 'Room Data Unavailable';
+          const busy = loading || Boolean(actionBusyId);
+          const busyThis = actionBusyId && String(actionBusyId) === String(b._id);
 
           return (
             <View key={b._id} style={styles.card}>
@@ -264,7 +477,7 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
                       style={[styles.statusText, { color: colors.text }]}
                       numberOfLines={1}
                     >
-                      {b.status}
+                      {b.booking_status || '—'}
                     </Text>
                   </View>
                 </View>
@@ -286,7 +499,7 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
                   <View style={styles.detailTextWrap}>
                     <Text style={styles.detailLabel}>Check-in</Text>
                     <Text style={styles.detailValue} numberOfLines={1}>
-                      {formatDate(b.checkInDate)}
+                      {formatDate(b.check_in_datetime || b.checkInDate)}
                     </Text>
                   </View>
                 </View>
@@ -295,7 +508,7 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
                   <View style={styles.detailTextWrap}>
                     <Text style={styles.detailLabel}>Check-out</Text>
                     <Text style={styles.detailValue} numberOfLines={1}>
-                      {formatDate(b.checkOutDate)}
+                      {formatDate(b.check_out_datetime || b.checkOutDate)}
                     </Text>
                   </View>
                 </View>
@@ -331,77 +544,133 @@ export default function BookingsScreen({ setActiveTab, isSuperAdmin = false }) {
 
               {/* Action Buttons */}
               <View style={styles.actionRow}>
-                {isSuperAdmin && b.status === 'Pending' && (
+                {canOperateBookings && b.booking_status === 'Pending' && (
                   <>
                     <TouchableOpacity
-                      style={[styles.approveBtn, styles.actionBtnSpacing]}
-                      onPress={() => handleStatusUpdate(b._id, 'Approved')}
+                      style={[styles.actionBtnBase, styles.approveBtn, styles.actionBtnSpacing]}
+                      onPress={() => handleApprove(b._id)}
+                      disabled={busy}
                     >
                       <Ionicons name="checkmark-circle-outline" size={16} color="#FFFFFF" />
                       <Text style={styles.approveBtnText}>Approve</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.rejectBtn, styles.actionBtnSpacing]}
-                      onPress={() => handleStatusUpdate(b._id, 'Rejected')}
+                      style={[styles.actionBtnBase, styles.rejectBtn, styles.actionBtnSpacing]}
+                      onPress={() => handleReject(b._id)}
+                      disabled={busy}
                     >
                       <Ionicons name="close-circle-outline" size={16} color="#EF4444" />
                       <Text style={styles.rejectBtnText}>Reject</Text>
                     </TouchableOpacity>
                   </>
                 )}
-                {b.status === 'Approved' && (
+                {canOperateBookings && canStaffConfirmPayment(b) && (
                   <TouchableOpacity
-                    style={[styles.approveBtn, styles.actionBtnSpacing]}
+                    style={[styles.actionBtnBase, styles.approveBtn, styles.actionBtnSpacing]}
                     onPress={() => handleConfirmPayment(b._id)}
+                    disabled={busy}
                   >
                     <Ionicons name="cash-outline" size={16} color="#FFFFFF" />
                     <Text style={styles.approveBtnText}>Confirm Payment</Text>
                   </TouchableOpacity>
                 )}
-                {['Approved', 'Confirmed', 'Completed'].includes(b.status) &&
-                  b.checkInStatus !== 'checked_in' && (
-                    <TouchableOpacity
-                      style={[styles.approveBtn, styles.actionBtnSpacing, { backgroundColor: '#0F766E' }]}
-                      onPress={() => handleCheckIn(b._id)}
-                    >
-                      <Ionicons name="log-in-outline" size={16} color="#FFFFFF" />
-                      <Text style={styles.approveBtnText}>Check-in</Text>
-                    </TouchableOpacity>
-                  )}
-                {b.checkInStatus === 'checked_in' && b.checkOutStatus !== 'checked_out' && (
+                {canOperateBookings && canStaffCheckIn(b) && (
                   <TouchableOpacity
-                    style={[styles.approveBtn, styles.actionBtnSpacing, { backgroundColor: '#7C3AED' }]}
+                    style={[
+                      styles.actionBtnBase,
+                      styles.approveBtn,
+                      styles.actionBtnSpacing,
+                      { backgroundColor: '#0F766E' },
+                      busyThis && { opacity: 0.7 },
+                    ]}
+                    onPress={() => handleCheckIn(b._id)}
+                    disabled={busy}
+                  >
+                    <Ionicons name="log-in-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.approveBtnText}>Check-in</Text>
+                  </TouchableOpacity>
+                )}
+                {canOperateBookings && canStaffManualCheckOut(b) && (
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtnBase,
+                      styles.approveBtn,
+                      styles.actionBtnSpacing,
+                      { backgroundColor: '#7C3AED' },
+                      busyThis && { opacity: 0.7 },
+                    ]}
                     onPress={() => handleCheckOut(b._id)}
+                    disabled={busy}
                   >
                     <Ionicons name="log-out-outline" size={16} color="#FFFFFF" />
                     <Text style={styles.approveBtnText}>Check-out</Text>
                   </TouchableOpacity>
                 )}
-                {isSuperAdmin && !['Completed', 'Cancelled'].includes(b.status) && (
+                {canOperateBookings && canStaffMarkCompleted(b) && (
                   <TouchableOpacity
-                    style={[styles.rejectBtn, styles.actionBtnSpacing]}
+                    style={[
+                      styles.actionBtnBase,
+                      styles.approveBtn,
+                      styles.actionBtnSpacing,
+                      { backgroundColor: '#15803D' },
+                      busyThis && { opacity: 0.7 },
+                    ]}
+                    onPress={() => handleMarkCompleted(b._id)}
+                    disabled={busy}
+                  >
+                    <Ionicons name="checkmark-done-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.approveBtnText}>Mark as Completed</Text>
+                  </TouchableOpacity>
+                )}
+                {isSuperAdmin && !['Completed', 'Cancelled'].includes(b.booking_status) && (
+                  <TouchableOpacity
+                    style={[styles.actionBtnBase, styles.rejectBtn, styles.actionBtnSpacing]}
                     onPress={() => handleAdminCancel(b._id)}
+                    disabled={busy}
                   >
                     <Text style={styles.rejectBtnText}>Cancel</Text>
                   </TouchableOpacity>
                 )}
                 {isSuperAdmin && (
-                  <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(b._id)}>
+                  <TouchableOpacity style={[styles.deleteBtn, busy && { opacity: 0.7 }]} onPress={() => handleDelete(b._id)} disabled={busy}>
                     <Ionicons name="trash-outline" size={18} color="#EF4444" />
                   </TouchableOpacity>
                 )}
               </View>
             </View>
           );
-        })}
-
-        {filtered.length === 0 && (
+        }}
+        ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Ionicons name="document-text-outline" size={48} color="#8E8E93" />
             <Text style={styles.emptyText}>No {activeFilter.toLowerCase()} bookings found</Text>
           </View>
-        )}
-      </ScrollView>
+        }
+        ListFooterComponent={
+          <View>
+            <View style={styles.paginationRow}>
+              <TouchableOpacity
+                style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}
+                onPress={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.pageBtnText, page <= 1 && styles.pageBtnTextDisabled]}>Previous</Text>
+              </TouchableOpacity>
+              <Text style={styles.pageText}>Page {page} of {totalPages}</Text>
+              <TouchableOpacity
+                style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}
+                onPress={() => setPage((p) => p + 1)}
+                disabled={page >= totalPages}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.pageBtnText, page >= totalPages && styles.pageBtnTextDisabled]}>Next</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
+      />
+
     </SafeAreaView>
   );
 }
@@ -533,12 +802,20 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'stretch',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: '#F0F0F2',
   },
   actionBtnSpacing: { marginRight: 10, marginBottom: 8 },
+  actionBtnBase: {
+    flexGrow: 1,
+    flexBasis: 160,
+    minWidth: 140,
+    justifyContent: 'center',
+  },
   approveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -546,6 +823,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
+    alignSelf: 'center',
+    marginTop: 10,
   },
   approveBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginLeft: 6 },
   rejectBtn: {
@@ -557,10 +836,41 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#FECACA',
+    alignSelf: 'center',
+    marginTop: 10,
   },
   rejectBtnText: { color: '#EF4444', fontSize: 13, fontWeight: '700', marginLeft: 6 },
   deleteBtn: { marginLeft: 'auto', padding: 8, marginBottom: 8 },
 
   emptyBox: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { color: '#8E8E93', marginTop: 8 },
+
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  pageBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+  },
+  pageBtnDisabled: { opacity: 0.5 },
+  pageBtnText: { fontSize: 13, fontWeight: '700', color: '#1B2036' },
+  pageBtnTextDisabled: { color: '#8E8E93' },
+  pageText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    flexGrow: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+    paddingVertical: 6,
+  },
 });

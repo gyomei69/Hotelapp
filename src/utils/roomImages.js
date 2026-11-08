@@ -4,23 +4,15 @@
  */
 export const DELUXE_ROOM_LOCAL = require('../../assets/rooms/deluxe-room.jpg');
 
+/** Bundled photo when DB has no `imageUrl` for Ocean View rooms (must match admin create flow). */
+export const OCEANVIEW_ROOM_LOCAL = require('../../assets/rooms/oceanview.jpg');
+
 /** Working HTTPS fallback (same scene as bundled asset) — e.g. seed data, exports */
 export const DELUXE_ROOM_IMAGE_URL =
   'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1200&q=85';
 
-const ROOM_TYPE_IMAGES = {
-  Standard:
-    'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=900&q=80',
-  Deluxe: DELUXE_ROOM_IMAGE_URL,
-  Suite:
-    'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
-  'Ocean View':
-    'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=900&q=80',
-  Penthouse:
-    'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80',
-};
-
-const DEFAULT_ROOM_IMAGE = ROOM_TYPE_IMAGES.Standard;
+// Generic fallback when DB has no imageUrl (offline-safe, but not room-specific).
+const DEFAULT_ROOM_IMAGE_LOCAL = require('../../assets/hotel-welcome.png');
 
 /** True for type labels that represent a Deluxe room (DB may vary casing/spacing). */
 export const isDeluxeRoomType = (roomType) => {
@@ -29,34 +21,41 @@ export const isDeluxeRoomType = (roomType) => {
   return t === 'deluxe' || t.includes('deluxe');
 };
 
+/** Ocean View (spacing/casing tolerant). */
+export const isOceanViewRoomType = (roomType) => {
+  if (roomType == null || typeof roomType !== 'string') return false;
+  const t = roomType.trim().toLowerCase().replace(/\s+/g, ' ');
+  return t.includes('ocean') && t.includes('view');
+};
+
 export const getRoomImageByType = (roomType) => {
-  if (roomType == null || typeof roomType !== 'string') return DEFAULT_ROOM_IMAGE;
-  const trimmed = roomType.trim();
-  if (ROOM_TYPE_IMAGES[trimmed]) return ROOM_TYPE_IMAGES[trimmed];
-  const lower = trimmed.toLowerCase();
-  for (const key of Object.keys(ROOM_TYPE_IMAGES)) {
-    if (key.toLowerCase() === lower) return ROOM_TYPE_IMAGES[key];
-  }
+  // For DB-driven images we don't hardcode type → URL mappings.
+  // Keep a tiny compatibility fallback for Deluxe only (legacy seed constant).
+  if (roomType == null || typeof roomType !== 'string') return DELUXE_ROOM_IMAGE_URL;
+  const lower = roomType.trim().toLowerCase();
   if (lower.includes('deluxe')) return DELUXE_ROOM_IMAGE_URL;
-  return DEFAULT_ROOM_IMAGE;
+  if (isOceanViewRoomType(roomType)) return '';
+  return '';
 };
 
 /**
  * Pass to `<Image source={getRoomImageSource(room)} />` — Deluxe uses bundled asset; others use uri.
  */
 export const getRoomImageSource = (room) => {
-  if (isDeluxeRoomType(room?.type)) {
-    return DELUXE_ROOM_LOCAL;
-  }
   const raw = room?.imageUrl && String(room.imageUrl).trim();
   if (raw) return { uri: raw };
-  return { uri: getRoomImageByType(room?.type) };
+  if (isOceanViewRoomType(room?.type)) return OCEANVIEW_ROOM_LOCAL;
+  // If Deluxe has no URL, fall back to bundled asset.
+  if (isDeluxeRoomType(room?.type)) return DELUXE_ROOM_LOCAL;
+  // Otherwise show a neutral local placeholder.
+  return DEFAULT_ROOM_IMAGE_LOCAL;
 };
 
 /** String URL for legacy `uri` usage; Deluxe returns canonical URL (prefer getRoomImageSource). */
 export const getRoomImage = (room) => {
-  if (isDeluxeRoomType(room?.type)) return DELUXE_ROOM_IMAGE_URL;
   const raw = room?.imageUrl && String(room.imageUrl).trim();
   if (raw) return raw;
+  if (isOceanViewRoomType(room?.type)) return '';
+  if (isDeluxeRoomType(room?.type)) return DELUXE_ROOM_IMAGE_URL;
   return getRoomImageByType(room?.type);
 };

@@ -12,6 +12,7 @@ import { getRoomImageSource } from '../utils/roomImages';
 import { buildRevenueReportHtml } from '../utils/revenueReportPdfHtml';
 import { showActionError } from '../utils/errorHandling';
 import NotificationBell from '../components/NotificationBell';
+import { handleStaffNotificationNavigate } from '../utils/notificationNavigation';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -109,15 +110,15 @@ export default function DashboardScreen({ setActiveTab, onNavigate, isSuperAdmin
     );
   }
 
-  const totalRooms = (stats?.availableRooms || 0) + (stats?.occupiedRooms || 0);
   const occupied = stats?.occupiedRooms || 0;
-  const available = stats?.availableRooms || 0;
+  const availableTypes = stats?.availableRooms || 0;
   const checkIns = stats?.newBookings || 0;
+  const roomTypes = stats?.roomTypes || 0;
 
   const statCards = [
-    { icon: 'bed-outline', bg: '#3478F6', value: totalRooms, label: 'Total Rooms' },
+    { icon: 'bed-outline', bg: '#3478F6', value: roomTypes, label: 'Type of Rooms' },
     { icon: 'people-outline', bg: '#FFB800', value: occupied, label: 'Occupied' },
-    { icon: 'home-outline', bg: '#34C759', value: available, label: 'Available' },
+    { icon: 'home-outline', bg: '#34C759', value: availableTypes, label: 'Available\nTypes' },
     { icon: 'log-in-outline', bg: '#FF6B35', value: checkIns, label: 'Check-ins\nToday' },
   ];
 
@@ -132,7 +133,9 @@ export default function DashboardScreen({ setActiveTab, onNavigate, isSuperAdmin
           </View>
           <View style={styles.topRight}>
             <NotificationBell
-              onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+              onNotificationNavigate={(item) =>
+                handleStaffNotificationNavigate(setActiveTab, isSuperAdmin, item)
+              }
             />
             <TouchableOpacity style={styles.profileBtn} onPress={() => onNavigate && onNavigate('profile')}>
               <Ionicons name="person" size={18} color="#FFFFFF" />
@@ -187,14 +190,26 @@ export default function DashboardScreen({ setActiveTab, onNavigate, isSuperAdmin
             style={[
               styles.actionCard,
               { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0F0F0' },
-              !isSuperAdmin && { flex: 1, maxWidth: '100%' },
             ]}
             onPress={() => onNavigate && onNavigate('bookingHistory')}
             activeOpacity={0.7}
           >
             <Ionicons name="calendar-outline" size={24} color="#1B2036" />
-            <Text style={[styles.actionLabelDark, { color: '#1B2036' }]}>View History</Text>
+            <Text style={[styles.actionLabelDark, { color: '#1B2036', textAlign: 'center', alignSelf: 'center' }]}>View History</Text>
           </TouchableOpacity>
+          {isSuperAdmin ? (
+            <TouchableOpacity
+              style={[
+                styles.actionCard,
+                { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0F0F0' },
+              ]}
+              onPress={() => onNavigate && onNavigate('activityLogs')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="list-outline" size={24} color="#1B2036" />
+              <Text style={[styles.actionLabelDark, { color: '#1B2036', textAlign: 'center', alignSelf: 'center' }]}>Activity logs</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* ─── Available Rooms ─── */}
@@ -301,7 +316,7 @@ const styles = StyleSheet.create({
   statCard: { width: cardW, flexDirection: 'row', alignItems: 'center', borderRadius: 16, padding: 16, gap: 14, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   statIcon: { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   statValue: { fontSize: 24, fontWeight: '700' },
-  statLabel: { fontSize: 11, fontWeight: '500', marginTop: 1 },
+  statLabel: { fontSize: 11, fontWeight: '500', marginTop: 1, flexShrink: 1 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 14 },
   seeAll: { fontSize: 13, fontWeight: '600', marginBottom: 14 },

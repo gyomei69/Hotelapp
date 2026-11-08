@@ -1,0 +1,22 @@
+diff --git a/node_modules/expo-web-browser/build/WebBrowser.js b/node_modules/expo-web-browser/build/WebBrowser.js
+index b912637..538143b 100644
+--- a/node_modules/expo-web-browser/build/WebBrowser.js
++++ b/node_modules/expo-web-browser/build/WebBrowser.js
+@@ -317,9 +317,15 @@ async function _openAuthSessionPolyfillAsync(startUrl, returnUrl, browserParams
+     }
+     try {
+         if (Platform.OS === 'android') {
++            // Patched: do not race _openBrowserAndWaitAndroidAsync vs Linking (Hotelapp scripts/patch-expo-web-browser-android-auth.js).
++            const redirectPromise = _waitForRedirectAsync(returnUrl);
++            const openResult = await openBrowserAsync(startUrl, browserParams);
++            if (openResult.type !== WebBrowserResultType.OPENED) {
++                return { type: openResult.type };
++            }
+             return await Promise.race([
+-                _openBrowserAndWaitAndroidAsync(startUrl, browserParams),
+-                _waitForRedirectAsync(returnUrl),
++                redirectPromise,
++                new Promise((resolve) => setTimeout(() => resolve({ type: WebBrowserResultType.DISMISS }), 120000)),
+             ]);
+         }
+         else {

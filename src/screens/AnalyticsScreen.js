@@ -9,6 +9,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { getStats } from '../services/api';
 import { showActionError } from '../utils/errorHandling';
 import NotificationBell from '../components/NotificationBell';
+import { handleStaffNotificationNavigate } from '../utils/notificationNavigation';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -67,7 +68,9 @@ export default function AnalyticsScreen({ setActiveTab }) {
             <Text style={styles.subtitle}>Performance metrics for your property.</Text>
           </View>
           <NotificationBell
-            onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
+            onNotificationNavigate={(item) =>
+              handleStaffNotificationNavigate(setActiveTab, true, item)
+            }
           />
         </View>
 

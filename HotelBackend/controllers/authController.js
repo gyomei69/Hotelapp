@@ -3,9 +3,15 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import PasswordReset from '../models/PasswordReset.js';
-import { OAuth2Client } from 'google-auth-library';
-import { sendPasswordResetCodeEmail } from '../services/emailService.js';
-import { verifyRecaptchaWithGoogle } from '../services/recaptchaService.js';
+import { sendPasswordResetCodeEmail, sendSignupVerificationCodeEmail } from '../services/emailService.js';
+import { logActivity } from '../services/activityLogService.js';
+import { ACTIVITY_ACTION } from '../constants/activityActions.js';
+import { signInOrRegisterWithGoogleIdToken } from '../services/googleAuthUserService.js';
+import {
+  upsertSignupVerification,
+  verifySignupVerification,
+  SIGNUP_VERIFY_TTL_MS,
+} from '../services/signupEmailVerificationService.js';
 
 const generateToken = (id, expiresIn = '30d') => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn });
@@ -15,24 +21,33 @@ const generateToken = (id, expiresIn = '30d') => {
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const sanitize = (str) => (typeof str === 'string' ? str.trim() : '');
 
-/** reCAPTCHA must pass before local auth; does not log secrets. */
-const ensureRecaptchaOk = async (req, res) => {
-  const raw = req.body.recaptchaToken;
-  const token = typeof raw === 'string' ? raw.trim() : '';
-  if (!token) {
-    res.status(400).json({ message: 'Security verification required' });
-    return false;
-  }
-  const ok = await verifyRecaptchaWithGoogle(token);
-  if (!ok) {
-    res.status(403).json({
-      message:
-        'Security verification failed. Check server logs for [reCAPTCHA]. Ensure RECAPTCHA_SECRET_KEY matches your site key, or set RECAPTCHA_DEV_BYPASS=1 locally only.',
-    });
-    return false;
-  }
-  return true;
+const normalizePhMobile = (input) => {
+  const raw = sanitize(input);
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  // 09xxxxxxxxx -> +639xxxxxxxxx
+  if (digits.length === 11 && digits.startsWith('09')) return `+63${digits.slice(1)}`;
+  // 9xxxxxxxxx -> +639xxxxxxxxx
+  if (digits.length === 10 && digits.startsWith('9')) return `+63${digits}`;
+  // 639xxxxxxxxx -> +639xxxxxxxxx
+  if (digits.length === 12 && digits.startsWith('63') && digits[2] === '9') return `+${digits}`;
+  // +63... path
+  if (raw.startsWith('+') && digits.length === 12 && digits.startsWith('63') && digits[2] === '9') return `+${digits}`;
+  return '';
 };
+
+const isValidPhMobileE164 = (e164) => typeof e164 === 'string' && /^\+639\d{9}$/.test(e164);
+
+const profilePayload = (user, req) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  phone: user.phone || '',
+  address: user.address || '',
+  role: user.role,
+  provider: user.provider,
+});
 
 // @desc    Auth user & get token
 // @route   POST /api/auth/login
@@ -47,15 +62,16 @@ export const authUser = async (req, res) => {
     return res.status(400).json({ message: 'Please enter a valid email address' });
   }
 
-  if (!(await ensureRecaptchaOk(req, res))) {
-    return;
-  }
-
   try {
     const user = await User.findOne({ email });
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    // Block unverified local accounts
+    if (user.provider === 'local' && user.isVerified === false) {
+      return res.status(403).json({ message: 'Please verify your email first' });
     }
 
     // Prevent local login for Google-only accounts
@@ -66,10 +82,19 @@ export const authUser = async (req, res) => {
     }
 
     if (await user.matchPassword(password)) {
+      await logActivity(
+        user._id,
+        user.role,
+        ACTIVITY_ACTION.LOGIN,
+        'Signed in with email and password',
+        null
+      );
       res.json({
         _id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone || '',
+        address: user.address || '',
         role: user.role,
         provider: user.provider,
         token: generateToken(user._id),
@@ -89,7 +114,8 @@ export const registerUser = async (req, res) => {
   const name = sanitize(req.body.name);
   const email = sanitize(req.body.email).toLowerCase();
   const password = req.body.password;
-  const phone = sanitize(req.body.phone || '');
+  const phoneRaw = sanitize(req.body.phone || '');
+  const phone = phoneRaw ? normalizePhMobile(phoneRaw) : '';
   let role = req.body.role || 'guest';
   if (role === 'user') role = 'guest';
 
@@ -105,9 +131,8 @@ export const registerUser = async (req, res) => {
   if (password.length < 6) {
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   }
-
-  if (!(await ensureRecaptchaOk(req, res))) {
-    return;
+  if (phoneRaw && !isValidPhMobileE164(phone)) {
+    return res.status(400).json({ message: 'Phone must be a PH mobile number in +63 format (e.g. +639XXXXXXXXX).' });
   }
 
   const allowedRoles = ['guest'];
@@ -120,23 +145,35 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists' });
     }
 
+    const address = sanitize(req.body.address || '');
+
     const user = await User.create({
       name,
       email,
       password,
       phone,
+      address,
       role: safeRole,
       provider: 'local',
+      isVerified: false,
     });
 
     if (user) {
+      // Create / refresh verification code
+      const code = await upsertSignupVerification(email);
+      await sendSignupVerificationCodeEmail(email, code);
+
+      await logActivity(
+        user._id,
+        user.role,
+        ACTIVITY_ACTION.REGISTER,
+        'Registered a new account',
+        null
+      );
       res.status(201).json({
-        _id: user._id,
-        name: user.name,
+        message: 'Verification code sent to email',
         email: user.email,
-        role: user.role,
-        provider: user.provider,
-        token: generateToken(user._id),
+        expiresInSec: Math.floor(SIGNUP_VERIFY_TTL_MS / 1000),
       });
     } else {
       res.status(400).json({ message: 'Invalid user data' });
@@ -147,15 +184,97 @@ export const registerUser = async (req, res) => {
   }
 };
 
-/**
- * Build allowed OAuth client IDs for ID token `aud` validation.
- * Web and Android (APK/Play) tokens use different client IDs — accept both.
- */
-const getGoogleJwtAudiences = () => {
-  const web = process.env.GOOGLE_WEB_CLIENT_ID;
-  const android = process.env.GOOGLE_ANDROID_CLIENT_ID;
-  const list = [web, android].filter(Boolean);
-  return list;
+// @desc    Verify email using 6-digit code; activates account and returns session
+// @route   POST /api/auth/verify-email
+export const verifyEmail = async (req, res) => {
+  const email = sanitize(req.body.email).toLowerCase();
+  const code = sanitize(req.body.code);
+
+  if (!email || !isValidEmail(email)) {
+    return res.status(400).json({ message: 'Please enter a valid email address' });
+  }
+  if (!code || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: 'Enter the 6-digit code from your email' });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired code.' });
+    }
+    if (user.provider !== 'local') {
+      return res.status(400).json({ message: 'This account does not require email verification.' });
+    }
+    if (user.isVerified === true) {
+      // Already verified — treat as success
+      return res.json({
+        ...profilePayload(user, req),
+        token: generateToken(user._id),
+      });
+    }
+
+    const result = await verifySignupVerification(email, code);
+    if (!result.ok) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    user.isVerified = true;
+    await user.save();
+
+    await logActivity(
+      user._id,
+      user.role,
+      ACTIVITY_ACTION.VERIFY_EMAIL,
+      'Verified email address',
+      null
+    );
+
+    return res.json({
+      ...profilePayload(user, req),
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    console.error('[verifyEmail Error]', error.message);
+    return res.status(500).json({ message: 'Server error. Please try again later.' });
+  }
+};
+
+// @desc    Resend email verification code (local accounts only)
+// @route   POST /api/auth/resend-verification
+export const resendVerificationCode = async (req, res) => {
+  const email = sanitize(req.body.email).toLowerCase();
+
+  if (!email || !isValidEmail(email)) {
+    return res.status(400).json({ message: 'Please enter a valid email address' });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Privacy: do not reveal existence
+      return res.json({
+        message: 'If an account exists, a code was sent to that email.',
+        expiresInSec: Math.floor(SIGNUP_VERIFY_TTL_MS / 1000),
+      });
+    }
+    if (user.provider !== 'local') {
+      return res.status(400).json({ message: 'This account does not require email verification.' });
+    }
+    if (user.isVerified === true) {
+      return res.json({ message: 'Email is already verified.' });
+    }
+
+    const code = await upsertSignupVerification(email);
+    await sendSignupVerificationCodeEmail(email, code);
+
+    return res.json({
+      message: 'Verification code sent to email',
+      expiresInSec: Math.floor(SIGNUP_VERIFY_TTL_MS / 1000),
+    });
+  } catch (error) {
+    console.error('[resendVerificationCode Error]', error.message);
+    return res.status(500).json({ message: 'Server error. Please try again later.' });
+  }
 };
 
 // @desc    Google Sign-In / Sign-Up (verify idToken, issue JWT)
@@ -168,59 +287,12 @@ export const googleLogin = async (req, res) => {
     return res.status(400).json({ message: 'Google ID token is required' });
   }
 
-  const audiences = getGoogleJwtAudiences();
-  if (audiences.length === 0) {
-    return res.status(500).json({ message: 'Google Sign-In is not configured on the server' });
-  }
-
   try {
-    const client = new OAuth2Client();
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: audiences,
-    });
-
-    const payload = ticket.getPayload();
-    const googleId = payload.sub;
-    const email = payload.email ? String(payload.email).toLowerCase() : null;
-    const name = payload.name || (email ? email.split('@')[0] : 'User');
-
-    if (!email) {
-      return res.status(400).json({ message: 'Could not retrieve email from Google account' });
-    }
-
-    let user = await User.findOne({ email });
-
-    if (user) {
-      if (!user.googleId) {
-        user.googleId = googleId;
-        if (!user.password) user.provider = 'google';
-        await user.save();
-      }
-    } else {
-      user = await User.create({
-        name,
-        email,
-        googleId,
-        provider: 'google',
-        role: 'guest',
-      });
-    }
-
-    const token = generateToken(user._id, '7d');
-
-    res.json({
-      token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        provider: user.provider,
-      },
-    });
+    const out = await signInOrRegisterWithGoogleIdToken(idToken);
+    res.json(out);
   } catch (error) {
     console.error('[Google Auth Error]', error.message);
+    const status = error.status || 500;
     const msg = String(error.message || '');
     if (
       msg.includes('Token used too late') ||
@@ -230,10 +302,12 @@ export const googleLogin = async (req, res) => {
     ) {
       return res.status(401).json({ message: 'Google token is invalid or expired. Please try again.' });
     }
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ message: msg || 'Request error' });
+    }
     res.status(500).json({ message: 'Google authentication failed. Please try again.' });
   }
 };
-
 
 // @desc    Get user profile
 // @route   GET /api/auth/profile
@@ -242,14 +316,7 @@ export const getUserProfile = async (req, res) => {
     const user = await User.findById(req.user._id);
 
     if (user) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        provider: user.provider,
-      });
+      res.json(profilePayload(user, req));
     } else {
       res.status(404).json({ message: 'User not found' });
     }
@@ -269,25 +336,39 @@ export const updateUserProfile = async (req, res) => {
     }
 
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    const phoneRaw = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    const phone = phoneRaw ? normalizePhMobile(phoneRaw) : '';
+    const address = typeof req.body.address === 'string' ? req.body.address.trim() : '';
 
     if (!name || name.length < 2) {
       return res.status(400).json({ message: 'Name must be at least 2 characters' });
     }
 
+    if (req.body.email !== undefined) {
+      const emailRaw = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+      if (!emailRaw || !isValidEmail(emailRaw)) {
+        return res.status(400).json({ message: 'Please enter a valid email address' });
+      }
+      const nextEmail = emailRaw.toLowerCase();
+      if (nextEmail !== user.email) {
+        const taken = await User.findOne({ email: nextEmail, _id: { $ne: user._id } });
+        if (taken) {
+          return res.status(400).json({ message: 'That email is already in use' });
+        }
+        user.email = nextEmail;
+      }
+    }
+
     user.name = name;
+    if (phoneRaw && !isValidPhMobileE164(phone)) {
+      return res.status(400).json({ message: 'Phone must be a PH mobile number in +63 format (e.g. +639XXXXXXXXX).' });
+    }
     user.phone = phone;
+    user.address = address;
 
     const updatedUser = await user.save();
 
-    res.json({
-      _id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      phone: updatedUser.phone,
-      role: updatedUser.role,
-      provider: updatedUser.provider,
-    });
+    res.json(profilePayload(updatedUser, req));
   } catch (error) {
     res.status(500).json({ message: 'Server error. Please try again later.' });
   }
@@ -295,7 +376,7 @@ export const updateUserProfile = async (req, res) => {
 
 // ── Forgot password (email + 6-digit code) ───────────────────────────
 
-const RESET_CODE_TTL_MS = 15 * 60 * 1000;
+const RESET_CODE_TTL_MS = 5 * 60 * 1000;
 
 // @desc    Request 6-digit reset code emailed to user
 // @route   POST /api/auth/forgot-password

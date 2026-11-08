@@ -1,6 +1,5 @@
 // Rate Limiting Middleware
 // Protects authentication endpoints from brute-force attacks.
-// More effective than reCAPTCHA for mobile API endpoints.
 
 import rateLimit from 'express-rate-limit';
 

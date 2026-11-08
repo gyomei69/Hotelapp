@@ -3,21 +3,44 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { rfs, rs } from '../theme/responsive';
 
-const STAFF_TABS = [
+const CORE_TABS = [
   { key: 'dashboard', label: 'Home', icon: 'home-outline', activeIcon: 'home' },
   { key: 'rooms', label: 'Rooms', icon: 'bed-outline', activeIcon: 'bed' },
   { key: 'guests', label: 'Bookings', icon: 'calendar-outline', activeIcon: 'calendar' },
 ];
 
-const SUPER_ADMIN_EXTRA_TABS = [
+/** Billing: staff only (admin uses Manage / other tools; billing tab hidden for admin). */
+const BILLING_TAB = { key: 'billing', label: 'Billing', icon: 'receipt-outline', activeIcon: 'receipt' };
+
+const FEEDBACK_TAB = {
+  key: 'feedback',
+  label: 'Feedback',
+  icon: 'chatbubble-ellipses-outline',
+  activeIcon: 'chatbubble-ellipses',
+};
+
+const ADMIN_EXTRA_TABS = [
   { key: 'analytics', label: 'Analytics', icon: 'bar-chart-outline', activeIcon: 'bar-chart' },
   { key: 'manage', label: 'Manage', icon: 'settings-outline', activeIcon: 'settings' },
 ];
 
+function buildStaffTabs(isSuperAdmin) {
+  if (isSuperAdmin) {
+    // Admin tools: no Guests/Bookings and no Feedback tab
+    return [
+      CORE_TABS[0], // dashboard
+      CORE_TABS[1], // rooms
+      ...ADMIN_EXTRA_TABS,
+    ];
+  }
+  return [...CORE_TABS, BILLING_TAB, FEEDBACK_TAB];
+}
+
 export default function BottomTabBar({ activeTab, setActiveTab, isSuperAdmin }) {
   const insets = useSafeAreaInsets();
-  const tabs = isSuperAdmin ? [...STAFF_TABS, ...SUPER_ADMIN_EXTRA_TABS] : STAFF_TABS;
+  const tabs = buildStaffTabs(isSuperAdmin);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: '#FFFFFF', borderTopColor: '#F0F0F0' }]}>
@@ -53,7 +76,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flexDirection: 'row',
-    minHeight: 56,
+    minHeight: rs(56),
     alignItems: 'center',
     justifyContent: 'space-around',
   },
@@ -61,11 +84,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-    paddingVertical: 6,
+    paddingVertical: rs(6),
   },
   label: {
-    fontSize: 10,
+    fontSize: rfs(10),
     fontWeight: '500',
-    marginTop: 2,
+    marginTop: rs(2),
   },
 });

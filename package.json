@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/patch-expo-web-browser-android-auth.js",
     "start": "npx expo start",
     "start:clean": "npx expo start --clear",
     "backend": "npm run start --prefix HotelBackend",
@@ -11,6 +12,7 @@
     "web": "npx expo start --web"
   },
   "dependencies": {
+    "@expo-google-fonts/cinzel": "^0.4.2",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.6.0",
@@ -24,7 +26,9 @@
     "expo-build-properties": "~55.0.13",
     "expo-constants": "~55.0.11",
     "expo-crypto": "~55.0.14",
+    "expo-dev-client": "~55.0.27",
     "expo-font": "~55.0.6",
+    "expo-image-picker": "~55.0.18",
     "expo-linking": "~55.0.12",
     "expo-print": "~55.0.13",
     "expo-sharing": "~55.0.18",

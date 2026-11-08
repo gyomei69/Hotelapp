@@ -30,6 +30,12 @@
     },
     "plugins": [
       "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow access to your photos to set a profile picture."
+        }
+      ],
       "@react-native-community/datetimepicker",
       "expo-sharing",
       "expo-font",
@@ -41,6 +47,11 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "706c31b6-248b-4dad-ba4d-5d50ab6e8575"
+      }
+    }
   }
 }

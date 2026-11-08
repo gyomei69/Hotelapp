@@ -12,6 +12,18 @@ const roomSchema = new mongoose.Schema(
       required: true,
       enum: ['Standard', 'Deluxe', 'Suite', 'Ocean View', 'Penthouse'],
     },
+    /** Catalog type key (kept in sync with `type`); used for pool availability. */
+    roomType: {
+      type: String,
+      enum: ['Standard', 'Deluxe', 'Suite', 'Ocean View', 'Penthouse'],
+    },
+    /** How many physical rooms exist for this room type (shared pool across rows of the same type). */
+    totalRooms: {
+      type: Number,
+      required: true,
+      default: 1,
+      min: 1,
+    },
     price: {
       type: Number,
       required: true,
@@ -40,6 +52,13 @@ const roomSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+roomSchema.pre('save', function syncRoomType(next) {
+  if (!this.roomType && this.type) {
+    this.roomType = this.type;
+  }
+  next();
+});
 
 const Room = mongoose.model('Room', roomSchema);
 export default Room;

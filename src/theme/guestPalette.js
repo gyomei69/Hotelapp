@@ -1,0 +1,21 @@
+/** Shared dark theme for guest app (Explore + tabs + key screens). */
+export const guestPalette = {
+  bg: '#0B1220',
+  surface: '#121A2A',
+  card: '#1B2436',
+  cardBorder: '#243047',
+  text: '#F1F5F9',
+  textSecondary: '#CBD5E1',
+  muted: '#94A3B8',
+  accent: '#E7C8A6',
+  accentSoft: 'rgba(231, 200, 166, 0.18)',
+  overlay: 'rgba(11, 18, 32, 0.45)',
+  danger: '#F87171',
+  dangerBg: 'rgba(248, 113, 113, 0.12)',
+  success: '#34D399',
+  successBg: 'rgba(52, 211, 153, 0.12)',
+  warning: '#FBBF24',
+  warningBg: 'rgba(251, 191, 36, 0.12)',
+  info: '#93C5FD',
+  infoBg: 'rgba(147, 197, 253, 0.12)',
+};

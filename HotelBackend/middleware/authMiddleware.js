@@ -19,20 +19,38 @@ export const protect = async (req, res, next) => {
   }
 };
 
-/** Super admin only — full system control. */
-export const requireAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ message: 'Super admin access required' });
-  }
+/** Normalize role from DB (handles legacy casing / whitespace). */
+const normalizedRole = (user) => {
+  if (!user || typeof user.role !== 'string') return '';
+  return user.role.trim().toLowerCase();
 };
 
-/** Staff or super admin — operational hotel tools (bookings list, payments, check-in, etc.). */
-export const requireStaffAccess = (req, res, next) => {
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'staff')) {
-    next();
-  } else {
-    res.status(403).json({ message: 'Staff access required' });
+/** Admin role only — full system control. */
+export const requireAdmin = (req, res, next) => {
+  if (normalizedRole(req.user) === 'admin') {
+    return next();
   }
+  return res.status(403).json({ message: 'Admin access required' });
 };
+
+/** Roles allowed for shared staff shell: dashboard, bookings ops, guests list, etc. */
+export const ROLES_ADMIN_STAFF = ['admin', 'staff'];
+
+/**
+ * Reusable role guard (normalized match).
+ * @param {string[]} allowedRoles
+ * @param {string} [message='Access denied']
+ */
+export const requireRole = (allowedRoles, message = 'Access denied') => {
+  const allowed = allowedRoles.map((r) => String(r).trim().toLowerCase());
+  return (req, res, next) => {
+    const role = normalizedRole(req.user);
+    if (req.user && allowed.includes(role)) {
+      return next();
+    }
+    return res.status(403).json({ message });
+  };
+};
+
+/** Staff or admin — operational hotel tools (bookings list, payments, check-in, etc.). */
+export const requireStaffAccess = requireRole(ROLES_ADMIN_STAFF, 'Staff access required');

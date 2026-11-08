@@ -1,6 +1,10 @@
 import jwt from 'jsonwebtoken';
 import Booking from '../models/Booking.js';
 import Guest from '../models/Guest.js';
+import User from '../models/User.js';
+import { logActivity } from '../services/activityLogService.js';
+import { ACTIVITY_ACTION } from '../constants/activityActions.js';
+import { notifyAdminRecipients, notifyUser } from '../services/notificationService.js';
 
 function effectivePaymentStatus(booking) {
   if (booking.paymentStatus) return booking.paymentStatus;
@@ -127,8 +131,8 @@ export const completeCardPayment = async (req, res) => {
 
     booking.paymentMethod = 'Card';
     booking.paymentStatus = 'Paid';
-    booking.status = 'Completed';
     booking.paidAt = new Date();
+    booking.status = 'Confirmed';
     await booking.save();
 
     if (booking.guest) {
@@ -137,6 +141,35 @@ export const completeCardPayment = async (req, res) => {
         guestDoc.totalSpent = (guestDoc.totalSpent || 0) + (Number(booking.totalAmount) || 0);
         await guestDoc.save();
       }
+    }
+
+    const payer = await User.findById(booking.user).select('role').lean();
+    await logActivity(
+      booking.user,
+      payer?.role || 'guest',
+      ACTIVITY_ACTION.PAYMENT_CARD_COMPLETED,
+      'Completed card payment for booking',
+      booking._id
+    );
+
+    try {
+      await notifyUser({
+        userId: booking.user,
+        type: 'CARD_PAYMENT_COMPLETED',
+        message: 'Your card payment was successful',
+        relatedId: booking._id,
+      });
+    } catch (e) {
+      console.warn('[completeCardPayment] notify user failed', e?.message || e);
+    }
+    try {
+      await notifyAdminRecipients({
+        type: 'CARD_PAYMENT_COMPLETED_TEAM',
+        message: 'Guest completed card payment for a booking',
+        relatedId: booking._id,
+      });
+    } catch (e) {
+      console.warn('[completeCardPayment] notify staff failed', e?.message || e);
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -183,6 +216,15 @@ export const cancelCardPayment = async (req, res) => {
     if (booking.status === 'Approved' && ['Awaiting Payment', 'Failed'].includes(ps)) {
       booking.paymentStatus = 'Failed';
       await booking.save();
+      try {
+        await notifyAdminRecipients({
+          type: 'CARD_PAYMENT_FAILED',
+          message: 'Guest cancelled or failed card checkout',
+          relatedId: booking._id,
+        });
+      } catch (e) {
+        console.warn('[cancelCardPayment] notify staff failed', e?.message || e);
+      }
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');

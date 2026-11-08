@@ -9,6 +9,9 @@ export default function NotificationBell({
   iconColor = '#1B263B',
   size = 22,
   style,
+  /** Preferred: full notification row for smart navigation. */
+  onNotificationNavigate,
+  /** Legacy: called with relatedId only (booking flows). */
   onBookingNotificationPress,
 }) {
   const [modalVisible, setModalVisible] = useState(false);
@@ -71,7 +74,9 @@ export default function NotificationBell({
         setUnreadCount((c) => Math.max(0, c - 1));
       }
       setModalVisible(false);
-      if (item.relatedId && typeof onBookingNotificationPress === 'function') {
+      if (typeof onNotificationNavigate === 'function') {
+        onNotificationNavigate(item);
+      } else if (item.relatedId && typeof onBookingNotificationPress === 'function') {
         onBookingNotificationPress(String(item.relatedId));
       }
     } catch (e) {

@@ -1,6 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, Platform, TouchableOpacity, ActivityIndicator, Image, Modal, TextInput, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  Platform,
+  TouchableOpacity,
+  ActivityIndicator,
+  Image,
+  Modal,
+  TextInput,
+  Alert,
+  useWindowDimensions,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather } from '@expo/vector-icons';
 import { getRooms, createBooking } from '../services/api';
@@ -8,6 +21,7 @@ import { getRoomImageSource } from '../utils/roomImages';
 import { showActionError } from '../utils/errorHandling';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
+import { handleGuestNotificationNavigate } from '../utils/notificationNavigation';
 
 const formatYmd = (d) => {
   const y = d.getFullYear();
@@ -31,8 +45,12 @@ const startOfDay = (d) => {
 
 export default function UserDashboardScreen({ setActiveTab }) {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const scrollRef = useRef(null);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState('hotel'); // hotel | bookings | billing | profile
   
   // Booking Modal State
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -233,71 +251,152 @@ export default function UserDashboardScreen({ setActiveTab }) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={{ height: Platform.OS === 'android' ? 44 : 12 }} />
-      <View style={styles.notifyBar}>
-        <NotificationBell
-          onBookingNotificationPress={() => setActiveTab && setActiveTab('mybookings')}
-        />
-      </View>
-
       {loading ? (
         <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color="#4F46E5" />
+          <ActivityIndicator size="large" color="#E7C8A6" />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          
-          <View style={styles.promoCard}>
-            <Image 
-               source={{ uri: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80' }} 
-               style={styles.promoImage} 
-            />
-            <View style={styles.promoOverlay}>
-               <Text style={styles.promoTag}>LIMITED OFFER</Text>
-               <Text style={styles.promoTitle}>Get 20% off on your first stay</Text>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.hero}>
+            <View style={styles.heroImageSlot}>
+              <Image
+                source={require('../../assets/homepage.png')}
+                style={styles.heroImage}
+                resizeMode="cover"
+              />
+              <View style={styles.heroGradient} />
+            </View>
+            <View style={[styles.heroBellBar, { paddingTop: insets.top + 6 }]}>
+              <NotificationBell
+                iconColor="#FFFFFF"
+                size={22}
+                onNotificationNavigate={(item) => handleGuestNotificationNavigate(setActiveTab, item)}
+              />
             </View>
           </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Exclusive Rooms</Text>
-            <TouchableOpacity><Text style={styles.seeAll}>See all</Text></TouchableOpacity>
-          </View>
+          <View style={styles.sheet}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            >
+              <TouchableOpacity
+                style={[styles.chip, activeCategory === 'hotel' && styles.chipActive]}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setActiveCategory('hotel');
+                  setActiveTab && setActiveTab('explore');
+                }}
+              >
+                <Feather
+                  name="home"
+                  size={16}
+                  color={activeCategory === 'hotel' ? '#1B2036' : '#CBD5E1'}
+                  style={styles.chipIcon}
+                />
+                <Text style={[styles.chipText, activeCategory === 'hotel' && styles.chipTextActive]}>Hotel</Text>
+              </TouchableOpacity>
 
-          {rooms.map(room => (
-            <View key={room._id} style={styles.card}>
-              <Image source={getRoomImageSource(room)} style={styles.roomImage} resizeMode="cover" />
-              <View style={styles.cardBody}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.roomName}>{room.type}</Text>
-                  <View style={styles.statusBadge}>
-                    <View style={styles.greenDot} />
-                    <Text style={styles.statusText}>Available</Text>
+              <TouchableOpacity
+                style={[styles.chip, activeCategory === 'bookings' && styles.chipActive]}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setActiveCategory('bookings');
+                  setActiveTab && setActiveTab('mybookings');
+                }}
+              >
+                <Feather
+                  name="calendar"
+                  size={16}
+                  color={activeCategory === 'bookings' ? '#1B2036' : '#CBD5E1'}
+                  style={styles.chipIcon}
+                />
+                <Text style={[styles.chipText, activeCategory === 'bookings' && styles.chipTextActive]}>Bookings</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.chip, activeCategory === 'billing' && styles.chipActive]}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setActiveCategory('billing');
+                  setActiveTab && setActiveTab('billing');
+                }}
+              >
+                <Feather
+                  name="file-text"
+                  size={16}
+                  color={activeCategory === 'billing' ? '#1B2036' : '#CBD5E1'}
+                  style={styles.chipIcon}
+                />
+                <Text style={[styles.chipText, activeCategory === 'billing' && styles.chipTextActive]}>Billing</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.chip, activeCategory === 'profile' && styles.chipActive]}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setActiveCategory('profile');
+                  setActiveTab && setActiveTab('profile');
+                }}
+              >
+                <Feather
+                  name="user"
+                  size={16}
+                  color={activeCategory === 'profile' ? '#1B2036' : '#CBD5E1'}
+                  style={styles.chipIcon}
+                />
+                <Text style={[styles.chipText, activeCategory === 'profile' && styles.chipTextActive]}>Profile</Text>
+              </TouchableOpacity>
+            </ScrollView>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Most Popular</Text>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => scrollRef.current?.scrollToEnd({ animated: true })}>
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.popularRow}
+            >
+              {rooms.map((room) => (
+                <View key={room._id} style={[styles.popCard, { width: Math.min(320, width * 0.78) }]}>
+                  <Image source={getRoomImageSource(room)} style={styles.popImage} resizeMode="cover" />
+                  <View style={styles.popBody}>
+                    <Text style={styles.popTitle} numberOfLines={1}>
+                      {room.type}
+                    </Text>
+                    <View style={styles.popMetaRow}>
+                      <Feather name="map-pin" size={12} color="#94A3B8" style={styles.popMetaIcon} />
+                      <Text style={styles.popMetaText} numberOfLines={1}>
+                        Room {room.roomNumber}
+                      </Text>
+                    </View>
+                    <View style={styles.popFooter}>
+                      <Text style={styles.popPrice}>₱{room.price}/night</Text>
+                      <TouchableOpacity style={styles.popBook} activeOpacity={0.85} onPress={() => openBooking(room)}>
+                        <Text style={styles.popBookText}>Book</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
-                <Text style={styles.roomDesc} numberOfLines={2}>
-                  {room.description || 'Experience comfort and style in our prime selection rooms.'}
-                </Text>
-                
-                <View style={styles.cardFooter}>
-                  <View>
-                    <Text style={styles.priceLabel}>Price / Night</Text>
-                    <Text style={styles.priceValue}>₱{room.price}</Text>
-                  </View>
-                  <TouchableOpacity style={styles.bookBtn} onPress={() => openBooking(room)}>
-                    <Text style={styles.bookBtnText}>Book Now</Text>
-                  </TouchableOpacity>
-                </View>
+              ))}
+            </ScrollView>
+
+            {rooms.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Feather name="moon" size={48} color="#CBD5E1" />
+                <Text style={styles.emptyText}>All rooms are fully booked for now.</Text>
               </View>
-            </View>
-          ))}
-
-          {rooms.length === 0 && (
-            <View style={styles.emptyBox}>
-               <Feather name="moon" size={48} color="#CBD5E1" />
-               <Text style={styles.emptyText}>All rooms are fully booked for now.</Text>
-            </View>
-          )}
-
+            ) : null}
+          </View>
         </ScrollView>
       )}
 
@@ -455,50 +554,104 @@ export default function UserDashboardScreen({ setActiveTab }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  notifyBar: {
+  safeArea: { flex: 1, backgroundColor: '#0B1220' },
+  centerBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { paddingBottom: 24 },
+
+  hero: {
+    height: 252,
+    width: '100%',
+    backgroundColor: '#0B1220',
+    position: 'relative',
+  },
+  heroImageSlot: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  heroImage: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    width: '100%',
+    height: '128%',
+    bottom: -56,
+  },
+  heroGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(11,18,32,0.22)',
+  },
+  heroBellBar: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    paddingHorizontal: 20,
+    paddingRight: 16,
     paddingBottom: 8,
+    zIndex: 2,
   },
-  header: { padding: 24, paddingBottom: 16, flexDirection: 'row', alignItems: 'center' },
-  headerTitleContainer: { flex: 1, alignItems: 'center', marginLeft: 44 }, // Offset the profile button width to center perfectly
-  greeting: { fontSize: 13, fontWeight: '600', color: '#8B5CF6', textTransform: 'uppercase', letterSpacing: 3, fontStyle: 'italic' },
-  title: { fontSize: 26, fontWeight: '900', color: '#1B2036', marginTop: 4, letterSpacing: 1 },
-  profileBtnWrapper: { position: 'absolute', right: 24 },
-  profileBtn: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
-  avatar: { width: '100%', height: '100%' },
-  centerBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { padding: 24, paddingTop: 0 },
-  
-  promoCard: { height: 180, borderRadius: 24, overflow: 'hidden', marginBottom: 32, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 15, elevation: 8 },
-  promoImage: { width: '100%', height: '100%' },
-  promoOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', padding: 20, justifyContent: 'flex-end' },
-  promoTag: { color: '#FCD34D', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  promoTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginTop: 4 },
 
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  sectionTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
-  seeAll: { color: '#4F46E5', fontWeight: '700', fontSize: 14 },
+  sheet: {
+    marginTop: -26,
+    backgroundColor: '#121A2A',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingTop: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+  },
+  chipsRow: { paddingVertical: 6 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: '#1B2436',
+    borderWidth: 1,
+    borderColor: '#243047',
+    marginRight: 10,
+  },
+  chipIcon: { marginRight: 8 },
+  chipActive: {
+    backgroundColor: '#E7C8A6',
+    borderColor: '#E7C8A6',
+  },
+  chipText: { color: '#CBD5E1', fontWeight: '800', fontSize: 13 },
+  chipTextActive: { color: '#1B2036' },
 
-  card: { backgroundColor: '#FFFFFF', borderRadius: 28, overflow: 'hidden', marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 12, elevation: 3 },
-  roomImage: { width: '100%', height: 220 },
-  cardBody: { padding: 20 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  roomName: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  greenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981', marginRight: 6 },
-  statusText: { color: '#10B981', fontSize: 11, fontWeight: '800' },
-  roomDesc: { fontSize: 14, color: '#64748B', lineHeight: 20, marginBottom: 20 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 16 },
-  priceLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase' },
-  priceValue: { fontSize: 22, fontWeight: '800', color: '#4F46E5', marginTop: 2 },
-  bookBtn: { backgroundColor: '#0F172A', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16 },
-  bookBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 14 },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: '#FFFFFF' },
+  seeAll: { color: '#E7C8A6', fontWeight: '800', fontSize: 13 },
 
-  emptyBox: { padding: 80, alignItems: 'center' },
-  emptyText: { color: '#94A3B8', marginTop: 12, textAlign: 'center' },
+  popularRow: { paddingBottom: 10 },
+  popCard: {
+    backgroundColor: '#1B2436',
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#243047',
+    marginRight: 14,
+  },
+  popImage: { width: '100%', height: 170 },
+  popBody: { padding: 14 },
+  popTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  popMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  popMetaIcon: { marginRight: 6 },
+  popMetaText: { color: '#94A3B8', fontSize: 12, fontWeight: '700', flex: 1 },
+  popFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  popPrice: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  popBook: {
+    backgroundColor: '#E7C8A6',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  popBookText: { color: '#1B2036', fontWeight: '900', fontSize: 13 },
+
+  emptyBox: { padding: 40, alignItems: 'center' },
+  emptyText: { color: '#94A3B8', marginTop: 12, textAlign: 'center', fontWeight: '700' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 24, maxHeight: '90%' },

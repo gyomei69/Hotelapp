@@ -141,6 +141,11 @@ export default function CreateRoomScreen({ onGoBack, onSuccess }) {
           value={imageUrl}
           onChangeText={setImageUrl}
         />
+        {type === 'Ocean View' ? (
+          <Text style={styles.hint}>
+            Leave blank to use the default ocean view photo in the app (bundled image).
+          </Text>
+        ) : null}
 
         <Text style={styles.inputLabel}>Availability *</Text>
         <View style={styles.statusRow}>
@@ -228,4 +233,10 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   saveBtnText: { color: '#F5F5F7', fontSize: 16, fontWeight: '700' },
+  hint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 8,
+    lineHeight: 18,
+  },
 });

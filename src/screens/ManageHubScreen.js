@@ -10,6 +10,8 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,17 +20,14 @@ import {
   updateUserRole,
   getOccupancyCalendar,
   getPaymentsReport,
-  getHousekeeping,
-  patchHousekeeping,
-  getFeedbackAdmin,
-  respondToFeedback,
 } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { showActionError } from '../utils/errorHandling';
+import ActivityLogsScreen from './ActivityLogsScreen';
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Super Admin' },
-  { value: 'staff', label: 'Staff' },
-  { value: 'guest', label: 'Guest' },
+  { value: 'admin', label: 'Admin', desc: 'Full system access', icon: 'shield-checkmark-outline' },
+  { value: 'staff', label: 'Staff', desc: 'Bookings & operations', icon: 'briefcase-outline' },
 ];
 
 export default function ManageHubScreen() {
@@ -39,13 +38,12 @@ export default function ManageHubScreen() {
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <Text style={styles.screenTitle}>Management</Text>
-          <Text style={styles.screenSub}>Super admin tools</Text>
+          <Text style={styles.screenSub}>Admin tools</Text>
           {[
-            { key: 'users', icon: 'people-outline', title: 'User roles', desc: 'Assign admin, staff, or guest' },
+            { key: 'users', icon: 'people-outline', title: 'User roles', desc: 'Assign Admin, Staff, or Guest' },
             { key: 'calendar', icon: 'calendar-outline', title: 'Room calendar', desc: 'Occupancy & reservations' },
             { key: 'payments', icon: 'wallet-outline', title: 'Payments', desc: 'Monitor payment status' },
-            { key: 'housekeeping', icon: 'sparkles-outline', title: 'Housekeeping', desc: 'Room cleaning status' },
-            { key: 'feedback', icon: 'chatbubble-outline', title: 'Guest feedback', desc: 'View & respond' },
+            { key: 'activityLogs', icon: 'list-outline', title: 'Activity logs', desc: 'Audit trail' },
           ].map((row) => (
             <TouchableOpacity
               key={row.key}
@@ -77,11 +75,8 @@ export default function ManageHubScreen() {
   if (view === 'payments') {
     return <PaymentsPanel onBack={() => setView('menu')} />;
   }
-  if (view === 'housekeeping') {
-    return <HousekeepingPanel onBack={() => setView('menu')} />;
-  }
-  if (view === 'feedback') {
-    return <FeedbackPanel onBack={() => setView('menu')} />;
+  if (view === 'activityLogs') {
+    return <ActivityLogsScreen onGoBack={() => setView('menu')} />;
   }
 
   return null;
@@ -100,8 +95,12 @@ function PanelHeader({ title, onBack }) {
 }
 
 function UsersPanel({ onBack }) {
+  const { user: authUser, refreshSession } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [roleModalUser, setRoleModalUser] = useState(null);
+  const [savingRole, setSavingRole] = useState(false);
+  const [credUser, setCredUser] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -119,21 +118,26 @@ function UsersPanel({ onBack }) {
     load();
   }, [load]);
 
-  const changeRole = (u) => {
-    const buttons = ROLE_OPTIONS.map((r) => ({
-      text: r.label,
-      onPress: async () => {
-        try {
-          await updateUserRole(u._id, r.value);
-          await load();
-          Alert.alert('Updated', `Role set to ${r.label}`);
-        } catch (e) {
-          showActionError('Role update', e, e.message || 'Could not update role.');
-        }
-      },
-    }));
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(u.name || u.email, 'Choose role', buttons);
+  const closeRoleModal = () => {
+    if (!savingRole) setRoleModalUser(null);
+  };
+
+  const applyRole = async (roleValue, roleLabel) => {
+    if (!roleModalUser || savingRole) return;
+    try {
+      setSavingRole(true);
+      await updateUserRole(roleModalUser._id, roleValue);
+      if (authUser && String(roleModalUser._id) === String(authUser._id)) {
+        await refreshSession();
+      }
+      await load();
+      setRoleModalUser(null);
+      Alert.alert('Updated', `Role set to ${roleLabel}`);
+    } catch (e) {
+      showActionError('Role update', e, e.message || 'Could not update role.');
+    } finally {
+      setSavingRole(false);
+    }
   };
 
   return (
@@ -149,16 +153,129 @@ function UsersPanel({ onBack }) {
           keyExtractor={(item) => String(item._id)}
           contentContainerStyle={styles.listPad}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.userRow} onPress={() => changeRole(item)} activeOpacity={0.7}>
-              <View>
+            <View style={styles.userRow}>
+              <TouchableOpacity
+                style={{ flex: 1, paddingRight: 10 }}
+                onPress={() => setRoleModalUser(item)}
+                activeOpacity={0.7}
+              >
                 <Text style={styles.userName}>{item.name}</Text>
                 <Text style={styles.userEmail}>{item.email}</Text>
-              </View>
-              <Text style={styles.roleBadge}>{item.role}</Text>
-            </TouchableOpacity>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setCredUser(item)}
+                style={styles.credBtn}
+                accessibilityRole="button"
+                accessibilityLabel="View user credentials"
+              >
+                <Ionicons name="eye-outline" size={20} color="#4A5BCC" />
+              </TouchableOpacity>
+
+              <Text style={styles.roleBadge}>
+                {item.role === 'admin' ? 'Admin' : item.role === 'staff' ? 'Staff' : item.role === 'guest' ? 'Guest' : item.role}
+              </Text>
+            </View>
           )}
         />
       )}
+
+      <Modal
+        visible={roleModalUser != null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeRoleModal}
+      >
+        <View style={styles.roleModalOverlay}>
+          <Pressable style={styles.roleModalBackdrop} onPress={closeRoleModal} />
+          <View style={styles.roleModalCard}>
+            <TouchableOpacity
+              style={styles.roleModalBackRow}
+              onPress={closeRoleModal}
+              disabled={savingRole}
+              activeOpacity={0.7}
+              hitSlop={12}
+            >
+              <Ionicons name="arrow-back" size={22} color="#4A5BCC" />
+              <Text style={styles.roleModalBackText}>Back</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.roleModalTitle}>Assign role</Text>
+            <Text style={styles.roleModalUserName} numberOfLines={1}>
+              {roleModalUser?.name || 'User'}
+            </Text>
+            <Text style={styles.roleModalUserEmail} numberOfLines={1}>
+              {roleModalUser?.email}
+            </Text>
+
+            <View style={styles.roleModalDivider} />
+
+            {ROLE_OPTIONS.map((r) => {
+              const isCurrent = roleModalUser?.role === r.value;
+              return (
+                <TouchableOpacity
+                  key={r.value}
+                  style={[styles.roleOptionRow, isCurrent && styles.roleOptionRowCurrent]}
+                  onPress={() => applyRole(r.value, r.label)}
+                  disabled={savingRole || isCurrent}
+                  activeOpacity={0.65}
+                >
+                  <View style={styles.roleOptionIconWrap}>
+                    <Ionicons name={r.icon} size={22} color={isCurrent ? '#4A5BCC' : '#64748B'} />
+                  </View>
+                  <View style={styles.roleOptionTextCol}>
+                    <Text style={[styles.roleOptionLabel, isCurrent && styles.roleOptionLabelCurrent]}>
+                      {r.label}
+                    </Text>
+                    <Text style={styles.roleOptionDesc}>{r.desc}</Text>
+                  </View>
+                  {isCurrent ? (
+                    <Ionicons name="checkmark-circle" size={22} color="#4A5BCC" />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+
+            {savingRole ? (
+              <View style={styles.roleModalSaving}>
+                <ActivityIndicator color="#4A5BCC" size="small" />
+                <Text style={styles.roleModalSavingText}>Saving…</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={credUser != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCredUser(null)}
+      >
+        <View style={styles.roleModalOverlay}>
+          <Pressable style={styles.roleModalBackdrop} onPress={() => setCredUser(null)} />
+          <View style={styles.roleModalCard}>
+            <Text style={styles.roleModalTitle}>User credentials</Text>
+            <Text style={styles.roleModalUserName} numberOfLines={1}>
+              {credUser?.name || 'User'}
+            </Text>
+            <Text style={styles.roleModalUserEmail} numberOfLines={1}>
+              {credUser?.email || '—'}
+            </Text>
+            <View style={styles.roleModalDivider} />
+
+            <Text style={styles.credRow}><Text style={styles.credLabel}>Phone:</Text> {credUser?.phone || '—'}</Text>
+            <Text style={styles.credRow}><Text style={styles.credLabel}>Provider:</Text> {credUser?.provider || '—'}</Text>
+            <Text style={styles.credRow}><Text style={styles.credLabel}>Verified:</Text> {credUser?.isVerified ? 'Yes' : 'No'}</Text>
+
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setCredUser(null)}>
+              <Text style={styles.closeBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -262,154 +379,6 @@ function PaymentsPanel({ onBack }) {
   );
 }
 
-function HousekeepingPanel({ onBack }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await getHousekeeping();
-      setRows(data || []);
-    } catch (e) {
-      showActionError('Housekeeping', e, 'Could not load tasks.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const cycleStatus = async (row) => {
-    const order = ['clean', 'dirty', 'in_progress'];
-    const i = order.indexOf(row.status);
-    const next = order[(i + 1) % order.length];
-    try {
-      await patchHousekeeping(row._id, { status: next });
-      await load();
-    } catch (e) {
-      showActionError('Update', e, 'Could not update status.');
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <PanelHeader title="Housekeeping" onBack={onBack} />
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color="#4A5BCC" />
-        </View>
-      ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={(item) => String(item._id)}
-          contentContainerStyle={styles.listPad}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.card} onPress={() => cycleStatus(item)} activeOpacity={0.7}>
-              <Text style={styles.cardTitle}>
-                Rm {item.roomDetails?.roomNumber} | {item.roomDetails?.type}
-              </Text>
-              <Text style={styles.cardMeta}>Status: {item.status}</Text>
-              {item.assignedTo?.name ? (
-                <Text style={styles.cardMeta}>Assigned: {item.assignedTo.name}</Text>
-              ) : null}
-              <Text style={styles.tapHint}>Tap to cycle: clean, dirty, in progress</Text>
-            </TouchableOpacity>
-          )}
-        />
-      )}
-    </SafeAreaView>
-  );
-}
-
-function FeedbackPanel({ onBack }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [replyId, setReplyId] = useState(null);
-  const [replyText, setReplyText] = useState('');
-
-  const load = useCallback(async () => {
-    try {
-      const data = await getFeedbackAdmin();
-      setRows(data || []);
-    } catch (e) {
-      showActionError('Feedback', e, 'Could not load feedback.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const sendReply = async () => {
-    if (!replyId || !replyText.trim()) return;
-    try {
-      await respondToFeedback(replyId, replyText.trim());
-      setReplyId(null);
-      setReplyText('');
-      await load();
-      Alert.alert('Sent', 'Response saved.');
-    } catch (e) {
-      showActionError('Reply', e, 'Could not save response.');
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <PanelHeader title="Feedback" onBack={onBack} />
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color="#4A5BCC" />
-        </View>
-      ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={(item) => String(item._id)}
-          contentContainerStyle={styles.listPad}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Text style={styles.cardMeta}>{item.user?.name || item.user?.email}</Text>
-              <Text style={styles.feedbackMsg}>{item.message}</Text>
-              {item.response ? (
-                <Text style={styles.responseText}>Response: {item.response}</Text>
-              ) : (
-                <TouchableOpacity
-                  style={styles.replyBtn}
-                  onPress={() => {
-                    setReplyId(item._id);
-                    setReplyText('');
-                  }}
-                >
-                  <Text style={styles.replyBtnText}>Respond</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-          ListFooterComponent={
-            replyId ? (
-              <View style={styles.replyBox}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Your response"
-                  value={replyText}
-                  onChangeText={setReplyText}
-                  multiline
-                />
-                <TouchableOpacity style={styles.sendBtn} onPress={sendReply}>
-                  <Text style={styles.sendBtnText}>Send</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null
-          }
-        />
-      )}
-    </SafeAreaView>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F5F5F7' },
   scroll: { padding: 20, paddingTop: Platform.OS === 'android' ? 40 : 16 },
@@ -463,6 +432,27 @@ const styles = StyleSheet.create({
   userName: { fontSize: 16, fontWeight: '600', color: '#1B2036' },
   userEmail: { fontSize: 13, color: '#8E8E93', marginTop: 2 },
   roleBadge: { fontSize: 13, fontWeight: '600', color: '#4A5BCC', textTransform: 'capitalize' },
+  credBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#EEF0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#DDE3FF',
+  },
+  credRow: { fontSize: 14, color: '#1B2036', marginTop: 8 },
+  credLabel: { fontWeight: '700', color: '#1B2036' },
+  closeBtn: {
+    marginTop: 18,
+    backgroundColor: '#1B2036',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  closeBtnText: { color: '#FFFFFF', fontWeight: '700' },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -474,7 +464,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '600', color: '#1B2036' },
   cardMeta: { fontSize: 13, color: '#64748B', marginTop: 4 },
   empty: { textAlign: 'center', color: '#8E8E93', marginTop: 24 },
-  tapHint: { fontSize: 12, color: '#94A3B8', marginTop: 8 },
   feedbackMsg: { fontSize: 15, color: '#1B2036', marginTop: 8, lineHeight: 22 },
   responseText: { fontSize: 14, color: '#059669', marginTop: 8 },
   replyBtn: { marginTop: 10, alignSelf: 'flex-start' },
@@ -497,4 +486,113 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendBtnText: { color: '#FFFFFF', fontWeight: '600' },
+
+  roleModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+  },
+  roleModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  roleModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 20,
+    maxWidth: 400,
+    width: '100%',
+    alignSelf: 'center',
+    zIndex: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  roleModalBackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingRight: 12,
+    marginBottom: 8,
+  },
+  roleModalBackText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4A5BCC',
+    marginLeft: 8,
+  },
+  roleModalTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#94A3B8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  roleModalUserName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1B2036',
+  },
+  roleModalUserEmail: {
+    fontSize: 14,
+    color: '#64748B',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  roleModalDivider: {
+    height: 1,
+    backgroundColor: '#EEF2F6',
+    marginVertical: 16,
+  },
+  roleOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    marginBottom: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#EEF2F6',
+  },
+  roleOptionRowCurrent: {
+    backgroundColor: '#EEF0FF',
+    borderColor: '#C7D2FE',
+  },
+  roleOptionIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  roleOptionTextCol: { flex: 1, minWidth: 0 },
+  roleOptionLabel: { fontSize: 16, fontWeight: '700', color: '#1B2036' },
+  roleOptionLabelCurrent: { color: '#1B2036' },
+  roleOptionDesc: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  roleModalSaving: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  roleModalSavingText: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '600',
+    marginLeft: 10,
+  },
 });

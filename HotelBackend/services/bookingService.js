@@ -1,4 +1,3 @@
-import Booking from '../models/Booking.js';
 import Room from '../models/Room.js';
 
 // ── Validation Helpers ──────────────────────────────────────────────
@@ -9,17 +8,28 @@ const VALID_PAYMENT_METHODS = ['Cash', 'Card', 'Online'];
  * Validate booking input data.
  * Returns { valid: true } or { valid: false, message: string }
  */
-export const validateBookingInput = ({ room, checkInDate, checkOutDate, guestCount, paymentMethod }) => {
+export const validateBookingInput = ({
+  room,
+  checkInDate,
+  checkOutDate,
+  check_in_datetime,
+  check_out_datetime,
+  guestCount,
+  paymentMethod,
+}) => {
   if (!room) {
     return { valid: false, message: 'Room ID is required' };
   }
 
-  if (!checkInDate || !checkOutDate) {
+  const inRaw = check_in_datetime || checkInDate;
+  const outRaw = check_out_datetime || checkOutDate;
+
+  if (!inRaw || !outRaw) {
     return { valid: false, message: 'Check-in and check-out dates are required' };
   }
 
-  const checkIn = new Date(checkInDate);
-  const checkOut = new Date(checkOutDate);
+  const checkIn = new Date(inRaw);
+  const checkOut = new Date(outRaw);
 
   if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
     return { valid: false, message: 'Invalid date format' };
@@ -29,7 +39,7 @@ export const validateBookingInput = ({ room, checkInDate, checkOutDate, guestCou
     return { valid: false, message: 'Check-out date must be after check-in date' };
   }
 
-  // Check-in should not be in the past (compare date-only, ignoring time)
+  // Check-in should not be in the past (keep legacy day-based rule for UX)
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const checkInDay = new Date(checkIn);
@@ -75,37 +85,6 @@ export const assertGuestCapacity = (roomDoc, guestCount) => {
     };
   }
   return { ok: true };
-};
-
-// ── Availability Check ──────────────────────────────────────────────
-
-/**
- * Check if a room is available for the given date range.
- * excludeBookingId — optionally exclude a booking (useful for updates).
- * Returns { available: boolean, conflictingBooking? }
- */
-export const checkRoomAvailability = async (roomId, checkInDate, checkOutDate, excludeBookingId = null) => {
-  const checkIn = new Date(checkInDate);
-  const checkOut = new Date(checkOutDate);
-
-  const filter = {
-    room: roomId,
-    status: { $in: ['Pending', 'Approved', 'Confirmed', 'Completed'] },
-    // Standard overlap detection: two ranges overlap if one starts before the other ends AND ends after the other starts
-    checkInDate: { $lt: checkOut },
-    checkOutDate: { $gt: checkIn },
-  };
-
-  if (excludeBookingId) {
-    filter._id = { $ne: excludeBookingId };
-  }
-
-  const conflictingBooking = await Booking.findOne(filter);
-
-  return {
-    available: !conflictingBooking,
-    conflictingBooking,
-  };
 };
 
 // ── Price Calculation ───────────────────────────────────────────────

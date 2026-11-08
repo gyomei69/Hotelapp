@@ -23,6 +23,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    address: {
+      type: String,
+      default: '',
+    },
+    avatarUrl: {
+      type: String,
+      default: '',
+    },
     role: {
       type: String,
       enum: ['admin', 'staff', 'guest'],
@@ -37,6 +45,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
       sparse: true,
+    },
+    /**
+     * Local accounts must verify email before login. Existing users created
+     * before this field existed will have `undefined` and are treated as verified.
+     */
+    isVerified: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }

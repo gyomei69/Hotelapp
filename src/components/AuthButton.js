@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { rfs, rs } from '../theme/responsive';
 
 /**
  * AuthButton — Figma-accurate pill button.
@@ -47,13 +48,13 @@ const AuthButton = ({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 52,
-    borderRadius: 28,
+    minHeight: rs(52),
+    borderRadius: rs(28),
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: rs(12),
+    paddingHorizontal: rs(16),
   },
   primary: {
     backgroundColor: '#1B2036',
@@ -67,7 +68,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   text: {
-    fontSize: 16,
+    fontSize: rfs(16),
     fontWeight: '600',
     letterSpacing: 0.3,
   },

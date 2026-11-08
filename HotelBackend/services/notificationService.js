@@ -5,12 +5,15 @@ const ADMIN_ROLES = ['admin', 'staff'];
 
 /**
  * Fan-out one in-app notification per admin/staff recipient (adminId set, userId null).
+ * @param {{ type: string; message: string; relatedId?: import('mongoose').Types.ObjectId | null; excludeUserIds?: import('mongoose').Types.ObjectId[] }} opts
  */
-export async function notifyAdminRecipients({ type, message, relatedId }) {
+export async function notifyAdminRecipients({ type, message, relatedId, excludeUserIds = [] }) {
+  const exclude = new Set((excludeUserIds || []).map((id) => String(id)));
   const recipients = await User.find({ role: { $in: ADMIN_ROLES } }).select('_id').lean();
-  if (!recipients.length) return;
+  const filtered = recipients.filter((u) => !exclude.has(String(u._id)));
+  if (!filtered.length) return;
   await Notification.insertMany(
-    recipients.map((u) => ({
+    filtered.map((u) => ({
       userId: null,
       adminId: u._id,
       type,

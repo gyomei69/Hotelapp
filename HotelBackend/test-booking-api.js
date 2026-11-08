@@ -17,12 +17,10 @@
  * Usage:
  *   1. Ensure MongoDB is running and seeded (node seed.js)
  *   2. Start the server (npm run dev)
- *   3. Set RECAPTCHA_TEST_BYPASS=1 in HotelBackend/.env for this script (dev only), or use real tokens
- *   4. Run: node test-booking-api.js
+ *   3. Run: node test-booking-api.js
  */
 
 const BASE = 'http://localhost:5000/api';
-const RECAPTCHA_PLACEHOLDER = '__INTEGRATION_TEST_RECAPTCHA__';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -61,7 +59,6 @@ async function runTests() {
   const adminLogin = await request('POST', '/auth/login', {
     email: 'admin@hotel.com',
     password: 'password123',
-    recaptchaToken: RECAPTCHA_PLACEHOLDER,
   });
   assert(adminLogin.status === 200, 'Admin login OK');
   assert(adminLogin.data?.role === 'admin', 'Admin role confirmed');
@@ -72,7 +69,6 @@ async function runTests() {
   const userLogin = await request('POST', '/auth/login', {
     email: 'user@hotel.com',
     password: 'password123',
-    recaptchaToken: RECAPTCHA_PLACEHOLDER,
   });
   assert(userLogin.status === 200, 'User login OK');
   assert(userLogin.data?.role === 'user', 'User role confirmed');

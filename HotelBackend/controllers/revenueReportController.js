@@ -1,4 +1,6 @@
 import Booking from '../models/Booking.js';
+import { logActivity } from '../services/activityLogService.js';
+import { ACTIVITY_ACTION } from '../constants/activityActions.js';
 
 const HOTEL_NAME = 'Aurora Grand Hotel';
 
@@ -48,6 +50,14 @@ export const getRevenueReport = async (req, res) => {
       amount: b.totalAmount,
       paidAt: (b.paidAt || b.updatedAt) ? new Date(b.paidAt || b.updatedAt).toISOString() : '',
     }));
+
+    await logActivity(
+      req.user._id,
+      req.user.role,
+      ACTIVITY_ACTION.GENERATE_REVENUE_REPORT,
+      `Generated revenue report (${reportTypeLabel})`,
+      null
+    );
 
     res.json({
       hotelName: HOTEL_NAME,

@@ -8,6 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+.expo-export-test/
 
 # Native
 .kotlin/
@@ -43,3 +44,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Backend runtime artifacts
+HotelBackend/uploads/

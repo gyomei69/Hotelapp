@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, TextInput, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { rfs, rs } from '../theme/responsive';
 
 /**
  * AuthInput — Figma-accurate pill-shaped input with left icon.
@@ -71,9 +72,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F5F5F7',
-    borderRadius: 28,
-    paddingHorizontal: 18,
-    minHeight: 52,
+    borderRadius: rs(28),
+    paddingHorizontal: rs(18),
+    minHeight: rs(52),
     borderWidth: 1,
     borderColor: '#E8E8E8',
   },
@@ -81,17 +82,17 @@ const styles = StyleSheet.create({
     borderColor: '#EF4444',
   },
   icon: {
-    marginRight: 12,
+    marginRight: rs(12),
   },
   input: {
     flex: 1,
-    fontSize: 14,
+    fontSize: rfs(14),
     color: '#1B2036',
-    paddingVertical: Platform.OS === 'ios' ? 14 : 12,
+    paddingVertical: Platform.OS === 'ios' ? rs(14) : rs(12),
   },
   eyeBtn: {
-    padding: 4,
-    marginLeft: 6,
+    padding: rs(4),
+    marginLeft: rs(6),
   },
 });
 

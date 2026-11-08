@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, Platform,
+  StyleSheet, Text, View, ScrollView, Platform, FlatList,
   TouchableOpacity, ActivityIndicator, Image, Modal, TextInput,
   Alert, Dimensions,
 } from 'react-native';
@@ -10,7 +10,9 @@ import { getRooms, createRoom, updateRoom, deleteRoom } from '../services/api';
 import { getRoomImageSource } from '../utils/roomImages';
 import { showActionError } from '../utils/errorHandling';
 import NotificationBell from '../components/NotificationBell';
+import { handleStaffNotificationNavigate } from '../utils/notificationNavigation';
 import { useAuth } from '../context/AuthContext';
+import { useIsMountedRef } from '../utils/useIsMountedRef';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -19,6 +21,9 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
   const isSuperAdmin = user?.role === 'admin';
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const loadAbortRef = React.useRef(null);
+  const mountedRef = useIsMountedRef();
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -32,14 +37,24 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
 
   const loadRooms = async () => {
     try {
+      loadAbortRef.current?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    try {
       setLoading(true);
-      const data = await getRooms();
-      setRooms(data);
+      const data = await getRooms({ signal: controller.signal });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      setRooms(Array.isArray(data) ? data : []);
     } catch (e) {
+      if (String(e?.message || '').toLowerCase().includes('canceled')) return;
+      if (String(e?.message || '').toLowerCase().includes('aborted')) return;
       console.error('Failed to load rooms:', e);
       showActionError('Rooms Error', e, 'Unable to load rooms right now.');
     } finally {
-      setLoading(false);
+      if (mountedRef.current && !controller.signal.aborted) setLoading(false);
     }
   };
 
@@ -67,6 +82,7 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
     setModalVisible(true);
   };
   const handleSubmit = async () => {
+    if (saving) return;
     if (!formData.roomNumber || !formData.price) {
       Alert.alert('Error', 'Please fill in room number and price.');
       return;
@@ -83,19 +99,22 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
       description: formData.description || '',
     };
     try {
+      setSaving(true);
       if (editingRoom) {
         await updateRoom(editingRoom._id, payload);
       } else {
         await createRoom(payload);
       }
       setModalVisible(false);
-      loadRooms();
+      await loadRooms();
     } catch (e) {
       showActionError(
         editingRoom ? 'Update Failed' : 'Create Failed',
         e,
         'Unable to save room. Please try again.'
       );
+    } finally {
+      setSaving(false);
     }
   };
   const handleDelete = (id) => {
@@ -103,10 +122,14 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
+          if (saving) return;
+          setSaving(true);
           await deleteRoom(id);
-          loadRooms();
+          await loadRooms();
         } catch (e) {
           showActionError('Delete Failed', e, 'Unable to delete room. Please try again.');
+        } finally {
+          setSaving(false);
         }
       }},
     ]);
@@ -120,43 +143,65 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Rooms & Booking</Text>
-          <View style={styles.headerActions}>
-            <NotificationBell
-              onBookingNotificationPress={() => setActiveTab && setActiveTab('guests')}
-            />
-            {isSuperAdmin ? (
-              <TouchableOpacity style={styles.addFab} onPress={handleAddPress}>
-                <Ionicons name="add" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
+      <FlatList
+        data={rooms}
+        keyExtractor={(room) => String(room._id)}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+        ListHeaderComponent={
+          <>
+            {/* Header */}
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Rooms & Booking</Text>
+              <View style={styles.headerActions}>
+                <NotificationBell
+                  onNotificationNavigate={(item) =>
+                    handleStaffNotificationNavigate(setActiveTab, isSuperAdmin, item)
+                  }
+                />
+                {isSuperAdmin ? (
+                  <TouchableOpacity style={[styles.addFab, (saving || loading) && { opacity: 0.7 }]} onPress={handleAddPress} disabled={saving || loading}>
+                    <Ionicons name="add" size={24} color="#FFFFFF" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+
+            {/* Summary pills */}
+            <View style={styles.pillsRow}>
+              <View style={styles.pill}>
+                <Text style={styles.pillLabel}>Total</Text>
+                <Text style={styles.pillValue}>{total}</Text>
+              </View>
+              <View style={[styles.pill, styles.pillGreen]}>
+                <Text style={[styles.pillLabel, { color: '#34C759' }]}>Available</Text>
+                <Text style={[styles.pillValue, { color: '#34C759' }]}>{availCount}</Text>
+              </View>
+              <View style={[styles.pill, styles.pillOrange]}>
+                <Text style={[styles.pillLabel, { color: '#FF9500' }]}>Occupied</Text>
+                <Text style={[styles.pillValue, { color: '#FF9500' }]}>{occCount}</Text>
+              </View>
+            </View>
+
+            {loading ? (
+              <View style={styles.center}><ActivityIndicator size="large" color="#4A5BCC" /></View>
             ) : null}
-          </View>
-        </View>
-
-        {/* Summary pills */}
-        <View style={styles.pillsRow}>
-          <View style={styles.pill}>
-            <Text style={styles.pillLabel}>Total</Text>
-            <Text style={styles.pillValue}>{total}</Text>
-          </View>
-          <View style={[styles.pill, styles.pillGreen]}>
-            <Text style={[styles.pillLabel, { color: '#34C759' }]}>Available</Text>
-            <Text style={[styles.pillValue, { color: '#34C759' }]}>{availCount}</Text>
-          </View>
-          <View style={[styles.pill, styles.pillOrange]}>
-            <Text style={[styles.pillLabel, { color: '#FF9500' }]}>Occupied</Text>
-            <Text style={[styles.pillValue, { color: '#FF9500' }]}>{occCount}</Text>
-          </View>
-        </View>
-
-        {loading ? (
-          <View style={styles.center}><ActivityIndicator size="large" color="#4A5BCC" /></View>
-        ) : (
-          rooms.map((room) => (
-            <View key={room._id} style={styles.roomCard}>
+          </>
+        }
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.emptyBox}>
+              <Ionicons name="bed-outline" size={48} color="#8E8E93" />
+              <Text style={[styles.emptyText, { color: '#8E8E93' }]}>No rooms found</Text>
+            </View>
+          ) : null
+        }
+        renderItem={({ item: room }) => (
+          <View key={room._id} style={styles.roomCard}>
               {/* Image */}
               <View style={styles.imageContainer}>
                 <Image
@@ -207,11 +252,11 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
 
                 {isSuperAdmin ? (
                   <View style={styles.staffRow}>
-                    <TouchableOpacity onPress={() => handleEditPress(room)} style={styles.staffBtn}>
+                    <TouchableOpacity onPress={() => handleEditPress(room)} style={styles.staffBtn} disabled={saving}>
                       <Ionicons name="pencil" size={16} color="#4A5BCC" />
                       <Text style={styles.staffBtnText}>Edit</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete(room._id)} style={styles.staffBtn}>
+                    <TouchableOpacity onPress={() => handleDelete(room._id)} style={styles.staffBtn} disabled={saving}>
                       <Ionicons name="trash-outline" size={16} color="#EF4444" />
                       <Text style={[styles.staffBtnText, { color: '#EF4444' }]}>Delete</Text>
                     </TouchableOpacity>
@@ -219,16 +264,8 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
                 ) : null}
               </View>
             </View>
-          ))
         )}
-
-        {rooms.length === 0 && !loading && (
-          <View style={styles.emptyBox}>
-            <Ionicons name="bed-outline" size={48} color="#8E8E93" />
-            <Text style={[styles.emptyText, { color: '#8E8E93' }]}>No rooms found</Text>
-          </View>
-        )}
-      </ScrollView>
+      />
 
       {/* Modal is kept separate and styles can remain mostly hardcoded or partially themed depending on preference, but let's theme the modal content too */}
       <Modal visible={modalVisible} animationType="slide" transparent={true}>
@@ -332,8 +369,16 @@ export default function RoomsScreen({ onNavigate, setActiveTab }) {
               </View>
             </ScrollView>
 
-            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#1B2036' }]} onPress={handleSubmit}>
-              <Text style={[styles.saveBtnText, { color: '#F5F5F7' }]}>Save Room</Text>
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: '#1B2036' }, saving && { opacity: 0.7 }]}
+              onPress={handleSubmit}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#F5F5F7" />
+              ) : (
+                <Text style={[styles.saveBtnText, { color: '#F5F5F7' }]}>Save Room</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>

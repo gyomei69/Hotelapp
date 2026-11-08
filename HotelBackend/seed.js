@@ -8,7 +8,6 @@ import User from './models/User.js';
 import Room from './models/Room.js';
 import Guest from './models/Guest.js';
 import Booking from './models/Booking.js';
-import Housekeeping from './models/Housekeeping.js';
 import Feedback from './models/Feedback.js';
 
 dotenv.config();
@@ -16,6 +15,8 @@ dotenv.config();
 /** Must match `DELUXE_ROOM_IMAGE_URL` in app `src/utils/roomImages.js` (Unsplash id must stay valid). */
 const DELUXE_IMAGE =
   'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1200&q=85';
+
+/** Empty imageUrl → app uses bundled `assets/rooms/oceanview.jpg` for Ocean View. */
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt')
   .then(async () => {
@@ -26,15 +27,15 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
     await Room.deleteMany();
     await Guest.deleteMany();
     await Booking.deleteMany();
-    await Housekeeping.deleteMany();
     await Feedback.deleteMany();
 
-    // Super admin + staff + guest
+    // Admin + staff + guest
     const adminUser = await User.create({
-      name: 'Super Admin',
+      name: 'Admin',
       email: 'admin@hotel.com',
       password: 'password123',
       role: 'admin',
+      isVerified: true,
     });
 
     const staffUser = await User.create({
@@ -42,6 +43,7 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       email: 'staff@hotel.com',
       password: 'password123',
       role: 'staff',
+      isVerified: true,
     });
 
     const standardUser = await User.create({
@@ -49,6 +51,7 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       email: 'user@hotel.com',
       password: 'password123',
       role: 'guest',
+      isVerified: true,
     });
 
     // Create Rooms (Standard 101 removed per product spec — keep 102 and others)
@@ -56,6 +59,8 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       {
         roomNumber: '102',
         type: 'Standard',
+        roomType: 'Standard',
+        totalRooms: 8,
         price: 150,
         capacity: 2,
         status: 'Available',
@@ -65,6 +70,8 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       {
         roomNumber: '201',
         type: 'Deluxe',
+        roomType: 'Deluxe',
+        totalRooms: 5,
         price: 250,
         capacity: 3,
         status: 'Available',
@@ -74,6 +81,8 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       {
         roomNumber: '301',
         type: 'Suite',
+        roomType: 'Suite',
+        totalRooms: 4,
         price: 400,
         capacity: 4,
         status: 'Available',
@@ -83,20 +92,26 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hotel-mgmt'
       {
         roomNumber: '401',
         type: 'Penthouse',
+        roomType: 'Penthouse',
+        totalRooms: 2,
         price: 850,
         capacity: 6,
         status: 'Available',
         description: 'The pinnacle of luxury. Our top-floor penthouse offers a private terrace, personal butler service, and a fully-equipped gourmet kitchen.',
         imageUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
       },
+      {
+        roomNumber: '305',
+        type: 'Ocean View',
+        roomType: 'Ocean View',
+        totalRooms: 6,
+        price: 320,
+        capacity: 3,
+        status: 'Available',
+        description: 'Wake up to the sea. Floor-to-ceiling windows and a private balcony overlooking the water.',
+        imageUrl: '',
+      },
     ]);
-
-    await Housekeeping.insertMany(
-      rooms.map((r) => ({
-        room: r._id,
-        status: 'clean',
-      }))
-    );
 
     // Create Guests
     const guests = await Guest.insertMany([

@@ -7,24 +7,35 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { showActionError } from '../utils/errorHandling';
-import { changePassword as changePasswordApi } from '../services/api';
+import { normalizePhMobile, isValidPhMobileE164 } from '../utils/normalizePhPhone';
+import {
+  changePassword as changePasswordApi,
+} from '../services/api';
 import NotificationBell from '../components/NotificationBell';
+import { handleStaffNotificationNavigate } from '../utils/notificationNavigation';
 
-export default function ProfileScreen({ onGoBack, setActiveTab }) {
+export default function ProfileScreen({ onGoBack, setActiveTab, isSuperAdmin = false }) {
   const { user, logout, updateProfile } = useAuth();
   const [modalVisible, setModalVisible] = React.useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = React.useState(false);
   const [name, setName] = React.useState(user?.name || '');
+  const [email, setEmail] = React.useState(user?.email || '');
   const [phone, setPhone] = React.useState(user?.phone || '');
+  const [address, setAddress] = React.useState(user?.address || '');
   const [saving, setSaving] = React.useState(false);
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [passwordSaving, setPasswordSaving] = React.useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = React.useState(false);
+  const [showNewPassword, setShowNewPassword] = React.useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
 
   React.useEffect(() => {
     setName(user?.name || '');
+    setEmail(user?.email || '');
     setPhone(user?.phone || '');
+    setAddress(user?.address || '');
   }, [user]);
 
   const initials = (user?.name || 'U')
@@ -39,9 +50,25 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
       showActionError('Validation Error', 'Name is required', 'Please enter your name.');
       return;
     }
+    const emailTrim = email.trim().toLowerCase();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      showActionError('Validation Error', 'Invalid email', 'Please enter a valid email address.');
+      return;
+    }
+    const phoneTrim = phone.trim();
+    const normalizedPhone = phoneTrim ? normalizePhMobile(phoneTrim) : '';
+    if (phoneTrim && !isValidPhMobileE164(normalizedPhone)) {
+      showActionError('Validation Error', 'Invalid phone number', 'Use PH mobile format: +63 9XXXXXXXXX');
+      return;
+    }
     setSaving(true);
     try {
-      await updateProfile({ name: name.trim(), phone: phone.trim() });
+      await updateProfile({
+        name: name.trim(),
+        email: emailTrim,
+        phone: normalizedPhone,
+        address: address.trim(),
+      });
       setModalVisible(false);
     } catch (error) {
       showActionError('Update Failed', error, 'Unable to update profile.');
@@ -50,11 +77,27 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
     }
   };
 
+  const openPasswordModal = () => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+    setPasswordModalVisible(true);
+  };
+
+  const resetPasswordModal = () => {
+    setPasswordModalVisible(false);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+  };
+
   const handleChangePassword = async () => {
-    if (!currentPassword) {
-      showActionError('Validation', 'Current password is required', 'Enter your current password.');
-      return;
-    }
     if (!newPassword || newPassword.length < 8) {
       showActionError('Validation', 'Invalid new password', 'New password must be at least 8 characters.');
       return;
@@ -63,13 +106,14 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
       showActionError('Validation', 'Mismatch', 'New password and confirmation do not match.');
       return;
     }
+    if (!currentPassword) {
+      showActionError('Validation', 'Current password is required', 'Enter your current password.');
+      return;
+    }
     setPasswordSaving(true);
     try {
       await changePasswordApi(currentPassword, newPassword, confirmPassword);
-      setPasswordModalVisible(false);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      resetPasswordModal();
       Alert.alert('Success', 'Your password has been updated.');
     } catch (error) {
       showActionError('Update Failed', error, error.message || 'Unable to change password.');
@@ -90,9 +134,9 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
           <View style={styles.headerBellWrap}>
             <NotificationBell
               iconColor="#FFFFFF"
-              onBookingNotificationPress={() => {
+              onNotificationNavigate={(item) => {
                 onGoBack?.();
-                setActiveTab?.('guests');
+                handleStaffNotificationNavigate(setActiveTab, isSuperAdmin, item);
               }}
             />
           </View>
@@ -106,7 +150,7 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
           <View style={styles.avatarInfo}>
             <Text style={styles.userName}>{user?.name || 'User'}</Text>
             <Text style={styles.userRole}>
-              {user?.role === 'admin' ? 'Super Admin' : user?.role === 'staff' ? 'Staff' : 'Guest'}
+              {user?.role === 'admin' ? 'Admin' : user?.role === 'staff' ? 'Staff' : 'Guest'}
             </Text>
           </View>
         </View>
@@ -117,9 +161,9 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
           <View style={styles.infoCard}>
             <InfoRow icon="mail-outline" label="Email" value={user?.email || 'user@hotel.com'} />
             <View style={styles.divider} />
-            <InfoRow icon="call-outline" label="Phone" value={user?.phone || '+1234 567 8900'} />
+            <InfoRow icon="call-outline" label="Phone" value={user?.phone || '—'} />
             <View style={styles.divider} />
-            <InfoRow icon="location-outline" label="Location" value="Malaybalay City" />
+            <InfoRow icon="location-outline" label="Address" value={user?.address?.trim() || '—'} />
           </View>
 
           <TouchableOpacity style={styles.editBtn} activeOpacity={0.8} onPress={() => setModalVisible(true)}>
@@ -134,14 +178,18 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
             <SettingsRow
               icon="lock-closed-outline"
               label="Change Password"
-              onPress={() => setPasswordModalVisible(true)}
+              onPress={openPasswordModal}
             />
           </View>
         </View>
 
         {/* Logout */}
         <View style={styles.logoutContainer}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={logout}
+            activeOpacity={0.8}
+          >
             <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
         </View>
@@ -156,10 +204,32 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
                 <Ionicons name="close" size={22} color="#1B2036" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Name</Text>
+            <Text style={styles.inputLabel}>Full name</Text>
             <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Your name" />
+            <Text style={styles.inputLabel}>Email</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              style={styles.input}
+              placeholder="Your email"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
             <Text style={styles.inputLabel}>Phone</Text>
-            <TextInput value={phone} onChangeText={setPhone} style={styles.input} placeholder="Your phone" keyboardType="phone-pad" />
+            <TextInput
+              value={phone}
+              onChangeText={setPhone}
+              style={styles.input}
+              placeholder="+63 9XXXXXXXXX"
+              keyboardType="phone-pad"
+            />
+            <Text style={styles.inputLabel}>Address</Text>
+            <TextInput
+              value={address}
+              onChangeText={setAddress}
+              style={styles.input}
+              placeholder="Street, city, region"
+            />
             <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.7 }]} onPress={handleSave} disabled={saving}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
             </TouchableOpacity>
@@ -172,41 +242,69 @@ export default function ProfileScreen({ onGoBack, setActiveTab }) {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Change Password</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setPasswordModalVisible(false);
-                  setCurrentPassword('');
-                  setNewPassword('');
-                  setConfirmPassword('');
-                }}
-              >
+            <TouchableOpacity
+              onPress={() => {
+                resetPasswordModal();
+              }}
+            >
                 <Ionicons name="close" size={22} color="#1B2036" />
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>Current Password</Text>
-            <TextInput
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              style={styles.input}
-              placeholder="Current password"
-              secureTextEntry
-            />
+            <View style={styles.passwordWrap}>
+              <TextInput
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                style={styles.passwordInput}
+                placeholder="Current password"
+                secureTextEntry={!showCurrentPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowCurrentPassword((v) => !v)}
+                style={styles.eyeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+              >
+                <Ionicons name={showCurrentPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.inputLabel}>New Password</Text>
-            <TextInput
-              value={newPassword}
-              onChangeText={setNewPassword}
-              style={styles.input}
-              placeholder="At least 8 characters"
-              secureTextEntry
-            />
+            <View style={styles.passwordWrap}>
+              <TextInput
+                value={newPassword}
+                onChangeText={setNewPassword}
+                style={styles.passwordInput}
+                placeholder="At least 8 characters"
+                secureTextEntry={!showNewPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowNewPassword((v) => !v)}
+                style={styles.eyeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={showNewPassword ? 'Hide new password' : 'Show new password'}
+              >
+                <Ionicons name={showNewPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
             <Text style={styles.inputLabel}>Confirm New Password</Text>
-            <TextInput
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              style={styles.input}
-              placeholder="Confirm new password"
-              secureTextEntry
-            />
+            <View style={styles.passwordWrap}>
+              <TextInput
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                style={styles.passwordInput}
+                placeholder="Confirm new password"
+                secureTextEntry={!showConfirmPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowConfirmPassword((v) => !v)}
+                style={styles.eyeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+              >
+                <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={[styles.saveBtn, passwordSaving && { opacity: 0.7 }]}
               onPress={handleChangePassword}
@@ -294,6 +392,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
+    overflow: 'hidden',
   },
   avatarText: {
     fontSize: 22,
@@ -445,6 +544,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1B2036',
   },
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#1B2036',
+  },
+  eyeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   saveBtn: {
     marginTop: 18,
     backgroundColor: '#1B2036',
@@ -456,5 +574,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
+  },
+  secondaryBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1B2036',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    color: '#1B2036',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkText: {
+    color: '#4A5BCC',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inputMuted: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 8,
+    lineHeight: 18,
   },
 });

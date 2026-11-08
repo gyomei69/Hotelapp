@@ -1,10 +1,12 @@
 import User from '../models/User.js';
+import { logActivity } from '../services/activityLogService.js';
+import { ACTIVITY_ACTION } from '../constants/activityActions.js';
 
 const ALLOWED_ROLES = ['admin', 'staff', 'guest'];
 
 // @desc    Get all users
 // @route   GET /api/users
-// @access  Super admin only
+// @access  Admin only
 export const getUsers = async (req, res) => {
   try {
     const users = await User.find({}).select('-password');
@@ -16,7 +18,7 @@ export const getUsers = async (req, res) => {
 
 // @desc    Update user role
 // @route   PATCH /api/users/:id/role
-// @access  Super admin only
+// @access  Admin only
 export const updateUserRole = async (req, res) => {
   try {
     const { role } = req.body;
@@ -33,11 +35,21 @@ export const updateUserRole = async (req, res) => {
     if (user.role === 'admin' && role !== 'admin') {
       const adminCount = await User.countDocuments({ role: 'admin' });
       if (adminCount <= 1) {
-        return res.status(400).json({ message: 'Cannot demote the only super admin' });
+        return res.status(400).json({ message: 'Cannot demote the only admin account' });
       }
     }
+    const prevRole = user.role;
     user.role = role;
     await user.save();
+
+    await logActivity(
+      req.user._id,
+      req.user.role,
+      ACTIVITY_ACTION.UPDATE_USER_ROLE,
+      `Updated user role: ${prevRole} → ${role}`,
+      user._id
+    );
+
     const safe = await User.findById(user._id).select('-password');
     res.json(safe);
   } catch (error) {
@@ -47,7 +59,7 @@ export const updateUserRole = async (req, res) => {
 
 // @desc    Delete user
 // @route   DELETE /api/users/:id
-// @access  Super admin only
+// @access  Admin only
 export const deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -56,7 +68,7 @@ export const deleteUser = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
     if (user.role === 'admin') {
-      return res.status(400).json({ message: 'Cannot delete super admin accounts' });
+      return res.status(400).json({ message: 'Cannot delete admin accounts' });
     }
     await user.deleteOne();
     res.json({ message: 'User removed' });
